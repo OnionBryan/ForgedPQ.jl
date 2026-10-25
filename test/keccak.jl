@@ -53,7 +53,7 @@ if SHA_IS_REFERENCE
             d = rand(UInt8, len)
             for bits in (128, 256)
                 f = bits == 128 ? SHA.shake128 : SHA.shake256
-                @test take!(ShakeReader(d; bits), 700) == f(d, UInt64(700))
+                @test take!(ShakeReader(d; bits), 700) == f(d, UInt(700))
             end
             for (n, f) in ((28, SHA.sha3_224), (32, SHA.sha3_256), (48, SHA.sha3_384), (64, SHA.sha3_512))
                 @test take!(sponge(d, 200 - 2n, 0x06), n) == f(d)

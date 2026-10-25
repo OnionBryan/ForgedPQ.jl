@@ -64,9 +64,9 @@ oracle_sha3(data, outbytes::Int) =
                        take!(sponge(data, 200 - 2outbytes, 0x06), outbytes)
 
 "SHAKE128/256 reference: SHA.jl where it has SHAKE, otherwise the ShakeReader above."
-oracle_shake128(data, n::Integer) = isdefined(SHA, :shake128) ? SHA.shake128(collect(UInt8, data), UInt64(n)) :
+oracle_shake128(data, n::Integer) = isdefined(SHA, :shake128) ? SHA.shake128(collect(UInt8, data), UInt(n)) :
                                                                take!(ShakeReader(data; bits=128), n)
-oracle_shake256(data, n::Integer) = isdefined(SHA, :shake256) ? SHA.shake256(collect(UInt8, data), UInt64(n)) :
+oracle_shake256(data, n::Integer) = isdefined(SHA, :shake256) ? SHA.shake256(collect(UInt8, data), UInt(n)) :
                                                                take!(ShakeReader(data; bits=256), n)
 squeeze!(r::ShakeReader) =
     (r.buf = collect(reinterpret(UInt8, [htol(r.A[mod1(i,5), (i-1)÷5+1]) for i in 1:r.rate÷8])); r.pos = 1)

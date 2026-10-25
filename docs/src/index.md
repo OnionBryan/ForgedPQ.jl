@@ -18,29 +18,40 @@ Pkg.add(url = "https://github.com/OnionBryan/ForgedPQ.jl")
 
 ## Quick start
 
-```julia
-using ForgedPQ
-msg = Vector{UInt8}("hello")
+```jldoctest quickstart
+julia> using ForgedPQ
 
-# Key encapsulation
-pk, sk = MLKEM768.keygen()
-ct, ss = MLKEM768.encaps(pk)
-MLKEM768.decaps(sk, ct) == ss            # true
+julia> msg = Vector{UInt8}("hello");
 
-# Signatures
-pk, sk = MLDSA65.keygen()
-sig = MLDSA65.sign(sk, msg)
-MLDSA65.verify(pk, msg, sig)             # true
+julia> pk, sk = MLKEM768.keygen();           # key encapsulation
 
-# Hybrid KEM: secure if either X25519 or ML-KEM-768 is
-pk, sk = XWing.keygen()
-ct, ss = XWing.encaps(pk)
-XWing.decaps(sk, ct) == ss               # true
+julia> ct, ss = MLKEM768.encaps(pk);
+
+julia> MLKEM768.decaps(sk, ct) == ss
+true
+
+julia> pk, sk = MLDSA65.keygen();            # lattice signatures
+
+julia> MLDSA65.verify(pk, msg, MLDSA65.sign(sk, msg))
+true
+
+julia> pk, sk = SLHDSA_SHA2_128f.keygen();   # hash-based signatures
+
+julia> SLHDSA_SHA2_128f.verify(pk, msg, SLHDSA_SHA2_128f.sign(sk, msg))
+true
+
+julia> pk, sk = XWing.keygen();              # hybrid KEM: secure if X25519 or ML-KEM-768 is
+
+julia> ct, ss = XWing.encaps(pk);
+
+julia> XWing.decaps(sk, ct) == ss
+true
 ```
 
 Keys, ciphertexts and signatures are `Vector{UInt8}` in the encodings of the standards, so they
-interoperate with other implementations. Results destructure positionally or by name:
-`kp = MLKEM768.keygen(); kp.public_key`.
+interoperate with other implementations; arguments may be any `AbstractVector{UInt8}` (views,
+`Memory`). Results destructure positionally or by name: `kp = MLKEM768.keygen(); kp.public_key`.
+More in [Examples](examples.md).
 
 ## Conventions
 

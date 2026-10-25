@@ -133,21 +133,6 @@ function kyber_invntt!(r::Vector{Int16})
     return r
 end
 
-# ── Basemul ──────────────────────────────────────────────────────────────────
-# Multiply two degree-1 polynomials in Z_q[X]/(X^2 - zeta).
-# Mirrors pq-crystals/kyber/ref/ntt.c:139-146.
-# r, a, b are length-2 views (or any AbstractVector{Int16}).
-
-function kyber_basemul!(r::AbstractVector{Int16}, a::AbstractVector{Int16},
-                        b::AbstractVector{Int16}, zeta::Int16)
-    r[1]  = fqmul(a[2], b[2])
-    r[1]  = fqmul(r[1], zeta)
-    r[1] += fqmul(a[1], b[1])
-    r[2]  = fqmul(a[1], b[2])
-    r[2] += fqmul(a[2], b[1])
-    return r
-end
-
 # ── Additional Constants ────────────────────────────────────────────────────
 
 const KYBER_SYMBYTES = 32
@@ -354,7 +339,7 @@ function kyber_poly_basemul_montgomery!(r::Vector{Int16},
     #   basemul(&r[4i+2], &a[4i+2], &b[4i+2], -zetas[64+i]);
     # }
     # Julia 1-indexed: zetas[64+i] in C = KYBER_ZETAS[65+i] in Julia.
-    # kyber_basemul! inlined on scalars: the same fqmul sequence, no SubArrays.
+    # basemul (ntt.c) on scalars: the same fqmul sequence, no SubArrays.
     checkbounds(r, 1:KYBER_N); checkbounds(a, 1:KYBER_N); checkbounds(b, 1:KYBER_N)
     @inbounds for i in 0:(KYBER_N ÷ 4 - 1)   # 0:63
         z = KYBER_ZETAS[65 + i]     # C's zetas[64+i]

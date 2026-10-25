@@ -95,7 +95,7 @@ function attempt(gs, c::Vector{Int}, n::Int, fp, L::Int, randombytes::R) where {
         s1, s2 = sample_preimage(gs, c, t0, t1, fp.σmin, randombytes)
         e1 = e2 = nothing
         try
-            sum(abs2, s1) + sum(abs2, s2) <= fp.β2 || return nothing
+            Falcon.sqnorm2(s1, s2) <= fp.β2 || return nothing
             e1 = FE.compress(s1, L); e1 === nothing && return nothing
             e2 = FE.compress(s2, L); e2 === nothing && return nothing
             return catbytes(header(n), e1, e2)
@@ -132,7 +132,7 @@ function verify(M2::AbstractVector{UInt8}, sig::AbstractVector{UInt8}, h::Abstra
     (length(sig) == sig_bytes(n) && sig[o] == header(n)) || return nothing
     s1 = FE.decompress(@view(sig[o+1:o+ℓ]), 8ℓ, n); s1 === nothing && return nothing
     s2 = FE.decompress(@view(sig[o+1+ℓ:o+2ℓ]), 8ℓ, n); s2 === nothing && return nothing
-    sum(abs2, s1) + sum(abs2, s2) <= fp.β2 || return nothing
+    Falcon.sqnorm2(s1, s2) <= fp.β2 || return nothing
     hq = Vector{Int}(undef, n)                          # h mod q, indexed from 1 whatever h's axes
     for (i, x) in enumerate(h)
         hq[i] = mod(x, q)

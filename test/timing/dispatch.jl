@@ -38,4 +38,8 @@ for (name, f, T) in paths
     println(rpad(name, 30), n, " runtime-dispatch reports")
 end
 println(bad == 0 ? "\nNO RUNTIME DISPATCH" : "\nRUNTIME DISPATCH FOUND")
-exit(bad == 0 ? 0 : 1)
+
+pkg = JET.get_reports(report_package(ForgedPQ; target_modules=(ForgedPQ,)))
+foreach(r -> (show(stdout, MIME"text/plain"(), r); println()), pkg)
+println(rpad("report_package", 30), length(pkg), " reports")
+exit(bad == 0 && isempty(pkg) ? 0 : 1)

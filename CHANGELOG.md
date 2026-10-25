@@ -22,9 +22,21 @@
   `ArgumentError`. `test/constant_time.jl`: the machine code of the constant-time primitives,
   checked for conditional branches and calls on x86-64 and AArch64.
 - Line coverage reported in the CI summary.
+- Every public operation accepts any `AbstractVector{UInt8}` (views, `Memory`, offset arrays);
+  inputs that are not a `Vector{UInt8}` are copied and the copy wiped.
+- ML-DSA `sign_prehash(sk, msg, hash, rnd)`: deterministic or caller-supplied randomness.
+- Examples page in the documentation; it and the quick start run as doctests.
+- Documentation page for every security level and the internal modules; a missing docstring
+  now fails the docs build.
+- CI runs JET's `report_package` on the whole package and fails on any report, alongside the
+  runtime-dispatch check on the secret paths.
+- Falcon reference tests (FFT, NTT, NTRU solve, sampler moments, ffSampling against Klein) and
+  component tests against independent oracles (ML-KEM PRF, XOF, base multiplication, K-PKE;
+  ML-DSA SampleInBall per FIPS 204 Algorithm 29) run in the test suite.
 
 ### Fixed
 
+- Falcon verification computes squared norms in `Int64` regardless of the platform's `Int`.
 - HashML-DSA with SHA2-512/224 or SHA2-512/256 threw `UndefVarError` on Julia 1.10 and 1.11, whose
   SHA stdlib lacks them; they are now computed from SHA-512 with the FIPS 180-4 initial values.
 
@@ -32,6 +44,9 @@
 
 - LICENSE is the plain MIT text; the NIST note moved to the README. Falcon and X-Wing are marked
   experimental, their specifications not being final.
+- Removed the unused `kyber_basemul!`.
+- The machine-code constant-time check is skipped under coverage, whose counters change the
+  compiled code.
 
 ## 0.5.0 (alpha)
 

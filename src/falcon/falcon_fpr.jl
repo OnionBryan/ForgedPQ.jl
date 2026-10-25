@@ -192,10 +192,13 @@ end
 
 function lt(x::Fpr, y::Fpr)
     sx = x.b % Int64; sy = y.b % Int64
-    sy &= ~((sx ⊻ sy) >> 63)
+    # The sign mask passes through `opaque`: on 32-bit x86, LLVM otherwise turns the masked AND
+    # into a branch on whether the signs differ.
+    sy &= ~(opaque(((sx ⊻ sy) >> 63) % UInt64) % Int64)
     cc0 = ((sx - sy) >> 63) & 1
     cc1 = ((sy - sx) >> 63) & 1
-    (cc0 ⊻ ((cc0 ⊻ cc1) & (((x.b & y.b) >> 63) % Int64))) == 1
+    # The bit is reinterpreted, not compared: a 64-bit `== 1` is a branch on 32-bit x86.
+    reinterpret(Bool, ((cc0 ⊻ ((cc0 ⊻ cc1) & (((x.b & y.b) >> 63) % Int64))) % UInt8) & 0x01)
 end
 
 # ── complex numbers on Fpr, with Julia's Complex{Float64} operation order ──

@@ -52,6 +52,36 @@ end
     @test !M.verify(sig, msg, pk)                                  # swapped arguments
 end
 
+# Byte arguments of any AbstractVector{UInt8} type give the same bytes as plain Vectors.
+struct ZeroBasedAPI <: AbstractVector{UInt8}; v::Vector{UInt8}; end
+Base.size(z::ZeroBasedAPI) = size(z.v)
+Base.axes(z::ZeroBasedAPI) = (Base.IdentityUnitRange(0:length(z.v)-1),)
+Base.getindex(z::ZeroBasedAPI, i::Int) = z.v[i+1]
+memof(v) = isdefined(Base, :Memory) ? (m = Base.Memory{UInt8}(undef, length(v)); copyto!(m, v); m) : view(copy(v), :)
+@testset "Standard-name API takes any byte array: $(M.NAME)" for M in (MLKEM512, MLKEM768, MLKEM1024)
+    seed = rand(UInt8, M.SEED_BYTES); m = rand(UInt8, 32)
+    pk, sk = M.keygen(seed)
+    ct, ss = M.encaps(pk, m)
+    for wrap in (v -> view(copy(v), :), memof, ZeroBasedAPI)
+        @test M.keygen(wrap(seed)) == M.keygen(seed)
+        @test M.encaps(wrap(pk), wrap(m)) == (; ciphertext = ct, shared_secret = ss)
+        @test M.decaps(wrap(sk), wrap(ct)) == ss
+        @test M.check_public_key(wrap(pk)) && M.check_secret_key(wrap(sk))
+    end
+end
+@testset "Standard-name API takes any byte array: $(M.NAME)" for M in (MLDSA44, MLDSA65, MLDSA87)
+    pk, sk = M.keygen(); msg = rand(UInt8, 40); rnd = rand(UInt8, 32); ctx = rand(UInt8, 5)
+    sig = M.sign(sk, msg, rnd; context = ctx); ps = M.sign_prehash(sk, msg, "SHA3-256", rnd; context = ctx)
+    for wrap in (v -> view(copy(v), :), memof, ZeroBasedAPI)
+        @test M.sign(wrap(sk), wrap(msg), wrap(rnd); context = wrap(ctx)) == sig
+        @test M.verify(wrap(pk), wrap(msg), wrap(sig); context = wrap(ctx))
+        @test M.sign_prehash(wrap(sk), wrap(msg), "SHA3-256", wrap(rnd); context = wrap(ctx)) == ps
+        @test M.verify_prehash(wrap(pk), wrap(msg), wrap(ps), "SHA3-256"; context = wrap(ctx))
+        @test M.verify(pk, wrap(msg), M.sign(wrap(sk), wrap(msg)))
+    end
+    @test ps == M.L.dilithium_sign_prehash_derand(msg, sk, "SHA3-256", rnd; context = ctx)
+end
+
 # The SHA-512/t computed from SHA-512 with the FIPS 180-4 initial values, which HashML-DSA uses
 # where SHA.jl lacks sha2_512_224/256 (Julia 1.10, 1.11), against the FIPS 180-4 "abc" values.
 @testset "SHA-512/224 and SHA-512/256 pre-hash" begin

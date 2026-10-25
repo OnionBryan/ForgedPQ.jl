@@ -78,6 +78,8 @@ Everything below runs in CI (`Pkg.test()`):
   the test of their fixed-count loop) and no call. CI runs it on x86-64 and AArch64.
 - **Julia versions:** 1.10 (LTS), 1.12 and the current release, on Linux x86-64; the current
   release on Linux AArch64, macOS (Apple silicon) and Windows.
+- **Static analysis:** JET finds no error anywhere in the package (`report_package`) and no
+  runtime dispatch on the secret paths; Aqua checks ambiguities, piracy and stale dependencies.
 
 `test/interop/liboqs_interop.jl` (runs in CI against liboqs 0.16.0 built from source) checks
 two-way interoperability with liboqs for every scheme. Keys, signatures and ciphertexts produced by either side are

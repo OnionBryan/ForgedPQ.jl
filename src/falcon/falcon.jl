@@ -52,6 +52,9 @@ sysrandom(k) = rand(RandomDevice(), UInt8, k)
 
 # ── polynomial helpers in ℤ[x]/(xⁿ+1) ──────────────────────────────────────
 centermod(x) = (y = mod(x, q); y > q ÷ 2 ? y - q : y)
+# ‖a‖² + ‖b‖² in Int64: a sum of n squares near q²/4 overflows a 32-bit Int, and a wrapped sum
+# would pass the signature-norm bound.
+sqnorm2(a, b) = sum(x -> Int64(x)^2, a; init = Int64(0)) + sum(x -> Int64(x)^2, b; init = Int64(0))
 
 # NTT helpers (invertibility, h = g/f, s0 = c − s1·h), negacyclic (ψ-weighted).
 # Per-degree tables (public constants), built once for n = 1, 2, …, 1024: ψ^i, n⁻¹ψ⁻ⁱ, ω^j and
@@ -150,7 +153,7 @@ end
 function negamul_int(a, b)
     Base.require_one_based_indexing(a, b)
     length(a) == length(b) || throw(DimensionMismatch("polynomials of different degrees"))
-    n = length(a); c = zeros(Int, n)
+    n = length(a); c = zeros(Int64, n)
     @inbounds for i in 1:n
         ai = a[i]
         for j in 1:n-i+1; c[i+j-1] += ai * b[j]; end
@@ -241,7 +244,7 @@ fits(v, bits) = (lim = 1 << (bits - 1); all(x -> -lim < x < lim, v))
 # status update, Perlner, Oct 2025).
 # fixedpoint: no floating point (FalconFxp, ePrint 2023/290): table sampling of (f, g), fixed-point
 # GS check and Babai reduction; n = 4..1024.
-const FXP_GS_LIMIT_206 = Int64(round((9999 // 10000 * 117 // 100)^2 * q * big(2)^32))
+const FXP_GS_LIMIT_206 = Int64(round((big(9999) // 10000 * 117 // 100)^2 * q * big(2)^32))
 # The seed is wiped once it has keyed the ChaCha20 generator, and the generator (state and
 # keystream) when keygen returns or throws. Each candidate's plain-data arrays are wiped in
 # keygen_candidate; only the BigInt values of the NTRU solver are left (SECURITY.md).
@@ -315,7 +318,7 @@ end
 function certify(f, g, F, G; fips206=false)
     p = params(length(f))
     c = FC.certify(f, g, F, G; σ=p.σ, σmin=p.σmin, σmax=FS.MAX_SIGMA,
-                   gs_factor = fips206 ? 9999 // 10000 * 117 // 100 : 117 // 100)
+                   gs_factor = fips206 ? big(9999) // 10000 * 117 // 100 : big(117) // 100)
     merge(c, (; ok = c.leaves_ok && c.gs_ok))
 end
 certify(sk::NamedTuple; fips206=false) = certify(sk.f, sk.g, sk.F, sk.G; fips206)
@@ -410,7 +413,7 @@ function sign_poly_klein(sk, gs, msg::AbstractVector{UInt8}; randombytes::R=sysr
         wipe!(z, Bz)
         s0 = round.(Int, @view s[1:n]); s1 = round.(Int, @view s[n+1:2n])
         wipe!(s)
-        norm2 = sum(abs2, s0) + sum(abs2, s1)
+        norm2 = sqnorm2(s0, s1)
         norm2 <= p.β2 && return (; salt, s1, s0, norm2)
         wipe!(s0, s1)
     end
@@ -525,7 +528,7 @@ function sign_poly(sk, gs, msg::AbstractVector{UInt8}; randombytes::R=sysrandom)
     try
         while true
             s0, s1 = sample_preimage(gs, c, t0, t1, p.σmin, randombytes)
-            norm2 = sum(abs2, s0) + sum(abs2, s1)
+            norm2 = sqnorm2(s0, s1)
             if norm2 <= p.β2
                 enc = FE.compress(s1, (p.sigbytes - 1 - SALT_LEN) * 8)
                 enc === nothing || return (; salt, s1, s0, norm2, enc)
@@ -559,7 +562,7 @@ function verify_poly(pk_h, n::Int, msg::AbstractVector{UInt8}, sig)
     (length(sig.s1) == n && length(pk_h) == n) || return false
     c = hash_to_point(msg, sig.salt, n)
     s0 = centermod.(c .- poly_mul_modq(sig.s1, pk_h))   # s0 = c − s1·h mod q (centered)
-    norm2 = sum(abs2, s0) + sum(abs2, sig.s1)
+    norm2 = sqnorm2(s0, sig.s1)
     return norm2 <= p.β2
 end
 
@@ -571,7 +574,7 @@ function verify_poly_ntt(ĥ, n::Int, msg::AbstractVector{UInt8}, sig)
     c = hash_to_point(msg, sig.salt, n)
     S = ntt_fwd(mod.(sig.s1, q))
     s0 = centermod.(c .- ntt_inv([mod(S[i] * ĥ[i], q) for i in 1:n]))
-    sum(abs2, s0) + sum(abs2, sig.s1) <= p.β2
+    sqnorm2(s0, sig.s1) <= p.β2
 end
 
 # ── Byte encodings (spec §3.11; C reference codec.c) ────────────────────────

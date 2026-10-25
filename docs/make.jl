@@ -16,11 +16,13 @@ makedocs(;
                              canonical = "https://onionbryan.github.io/ForgedPQ.jl/stable/"),
     pages = ["Home" => "index.md",
              "Choosing a scheme" => "choosing.md",
+             "Examples" => "examples.md",
              "API" => "api.md",
+             "All levels and internals" => "levels.md",
              "Security" => "security.md",
              "Changelog" => "changelog.md"],
     checkdocs = :exports,
-    warnonly = [:missing_docs, :cross_references],
+    warnonly = [:cross_references],
 )
 
 deploydocs(; repo = "github.com/OnionBryan/ForgedPQ.jl.git", devbranch = "main", push_preview = false)

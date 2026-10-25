@@ -93,8 +93,12 @@ end
 # ∏p > 2H², where rational reconstruction is unique.
 
 powmod_(b, e, p) = powermod(b, e, p)
+# Residues are added in Int before reduction (products go through Int128): below 2³⁰ on a 32-bit
+# Int, a sum of two cannot overflow. The leaves are reconstructed exactly, so the prime size only
+# changes how many primes are used.
+const PRIME_BOUND = Sys.WORD_SIZE == 64 ? 2^31 - 1 : 2^30 - 1
 function ntt_primes(n, bits)
-    ps = Int[]; acc = 0.0; k = (2^31 - 1) ÷ (2n)
+    ps = Int[]; acc = 0.0; k = PRIME_BOUND ÷ (2n)
     while acc < bits
         p = k * 2n + 1; k -= 1
         isprime_(p) || continue
@@ -261,12 +265,12 @@ function exact_gs_norm2(f, g)
 end
 
 """
-    certify(sk; σ, σmin, σmax, gs_factor=117//100) -> NamedTuple
+    certify(sk; σ, σmin, σmax, gs_factor=big(117)//100) -> NamedTuple
 
 Exact certificate for a Falcon key: every ffLDL leaf satisfies σmin ≤ σ/√d ≤ σmax, and the
 Gram–Schmidt norm is ≤ gs_factor·√q. The float parameters are taken at their exact binary values.
 """
-function certify(f, g, F, G; σ, σmin, σmax, gs_factor=117//100)
+function certify(f, g, F, G; σ, σmin, σmax, gs_factor=big(117)//100)
     d = exact_leaves(f, g, F, G)
     # Each leaf covers two Gram–Schmidt vectors and det(B₀) = qⁿ, so ∏d = qⁿ exactly (self-check).
     prod(d) == big(q)^length(f) || error("ffLDL leaf reconstruction failed the determinant check")

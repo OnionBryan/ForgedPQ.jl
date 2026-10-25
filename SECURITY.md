@@ -67,6 +67,9 @@ did not, so decapsulation time does not distinguish valid from tampered cipherte
 resolution. Comparing a fixed ciphertext with varied ones does give |t| ≈ 10 at 10⁶ samples — the
 cache effect of repeating identical input described in the README, not a property of the code.
 
+2026-10-24, Apple M5 (AArch64), Julia 1.12.6, same script and sample count: every test below the
+threshold (largest 2.62, X25519 with a fixed vs random scalar).
+
 ### Variable-time
 
 | Operation | Note |

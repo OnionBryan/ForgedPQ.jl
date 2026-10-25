@@ -43,7 +43,9 @@ function branches(f, T)
     [strip(l) for l in lines if occursin(CONDBR, l)], [strip(l) for l in lines if occursin(CALL, l)]
 end
 
-if Sys.ARCH in (:x86_64, :aarch64)
+if Base.JLOptions().code_coverage != 0
+    @info "Constant-time machine-code check skipped: coverage counters change the compiled code"
+elseif Sys.ARCH in (:x86_64, :aarch64)
     @testset "Constant-time machine code ($(Sys.ARCH)): $name" for (name, f, T, loop) in CT_PRIMITIVES
         conds, calls = branches(f, T)
         @test isempty(calls)

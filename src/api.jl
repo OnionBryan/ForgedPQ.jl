@@ -2,9 +2,30 @@
 # specification, with argument order as in those documents. Each wraps the per-level modules
 # (MLKEM.Category*, MLDSA.Category*, FNDSA.Falcon*), which remain available unchanged.
 
+# Byte arrays reach the per-level functions as Vector{UInt8}: a Vector as is, anything else (a view,
+# Memory, an offset array) as a 1-based copy that is wiped when `f` returns or throws.
+function with_vector(f, x::AbstractVector{UInt8})
+    x isa Vector{UInt8} && return f(x)
+    y = Vector{UInt8}(undef, length(x))
+    try
+        copyto!(y, x)
+        f(y)
+    finally
+        Wipe.wipe!(y)
+    end
+end
+with_vector(f, x::AbstractVector{UInt8}, y::AbstractVector{UInt8}) = with_vector(a -> with_vector(b -> f(a, b), y), x)
+with_vector(f, x::AbstractVector{UInt8}, y::AbstractVector{UInt8}, z::AbstractVector{UInt8}) =
+    with_vector((a, b) -> with_vector(c -> f(a, b, c), z), x, y)
+with_vector(f, x::AbstractVector{UInt8}, y::AbstractVector{UInt8}, z::AbstractVector{UInt8}, w::AbstractVector{UInt8}) =
+    with_vector((a, b, c) -> with_vector(d -> f(a, b, c, d), w), x, y, z)
+
+const ByteVec = AbstractVector{UInt8}
+
 for (name, level) in ((:MLKEM512, :Category1), (:MLKEM768, :Category3), (:MLKEM1024, :Category5))
     @eval module $name
     import ..MLKEM
+    import ..with_vector, ..ByteVec
     const L = MLKEM.$level
 
     "Parameter set name, as in FIPS 203."
@@ -29,7 +50,9 @@ for (name, level) in ((:MLKEM512, :Category1), (:MLKEM768, :Category3), (:MLKEM1
     (ML-KEM.KeyGen_internal, Alg. 16). Destructures as `pk, sk = keygen()`.
     """
     keygen() = ((pk, sk) = L.kyber_kem_keypair(); (; public_key = pk, secret_key = sk))
-    keygen(seed::Vector{UInt8}) = ((pk, sk) = L.kyber_kem_keypair_derand(seed); (; public_key = pk, secret_key = sk))
+    keygen(seed::ByteVec) = with_vector(seed) do s
+        pk, sk = L.kyber_kem_keypair_derand(s); (; public_key = pk, secret_key = sk)
+    end
 
     """
         encaps(public_key) -> (; ciphertext, shared_secret)
@@ -39,10 +62,12 @@ for (name, level) in ((:MLKEM512, :Category1), (:MLKEM768, :Category3), (:MLKEM1
     throws `ArgumentError`. With a 32-byte `m`, encapsulation is deterministic
     (ML-KEM.Encaps_internal, Alg. 17). Destructures as `ct, ss = encaps(pk)`.
     """
-    encaps(public_key::Vector{UInt8}) =
-        ((ct, ss) = L.kyber_kem_enc(public_key); (; ciphertext = ct, shared_secret = ss))
-    encaps(public_key::Vector{UInt8}, m::Vector{UInt8}) =
-        ((ct, ss) = L.kyber_kem_enc_derand(public_key, m); (; ciphertext = ct, shared_secret = ss))
+    encaps(public_key::ByteVec) = with_vector(public_key) do pk
+        ct, ss = L.kyber_kem_enc(pk); (; ciphertext = ct, shared_secret = ss)
+    end
+    encaps(public_key::ByteVec, m::ByteVec) = with_vector(public_key, m) do pk, mm
+        ct, ss = L.kyber_kem_enc_derand(pk, mm); (; ciphertext = ct, shared_secret = ss)
+    end
 
     """
         decaps(secret_key, ciphertext) -> shared_secret
@@ -50,18 +75,19 @@ for (name, level) in ((:MLKEM512, :Category1), (:MLKEM768, :Category3), (:MLKEM1
     ML-KEM.Decaps (FIPS 203 Alg. 21) after the decapsulation key check of §7.3. A ciphertext of
     the right length that fails re-encryption gives the implicit-rejection secret, not an error.
     """
-    decaps(secret_key::Vector{UInt8}, ciphertext::Vector{UInt8}) = L.kyber_kem_dec(ciphertext, secret_key)
+    decaps(secret_key::ByteVec, ciphertext::ByteVec) = with_vector((sk, ct) -> L.kyber_kem_dec(ct, sk), secret_key, ciphertext)
 
     "Encapsulation key check (FIPS 203 §7.2): length and every coefficient below q."
-    check_public_key(public_key::AbstractVector{UInt8}) = L.kyber_ek_check(public_key)
+    check_public_key(public_key::ByteVec) = L.kyber_ek_check(public_key)
     "Decapsulation key check (FIPS 203 §7.3): length and the stored H(ek)."
-    check_secret_key(secret_key::AbstractVector{UInt8}) = L.kyber_dk_check(secret_key)
+    check_secret_key(secret_key::ByteVec) = L.kyber_dk_check(secret_key)
     end
 end
 
 for (name, level) in ((:MLDSA44, :Category2), (:MLDSA65, :Category3), (:MLDSA87, :Category5))
     @eval module $name
     import ..MLDSA
+    import ..with_vector, ..ByteVec
     const L = MLDSA.$level
 
     "Parameter set name, as in FIPS 204."
@@ -83,7 +109,9 @@ for (name, level) in ((:MLDSA44, :Category2), (:MLDSA65, :Category3), (:MLDSA87,
     `seed` = ξ the key pair is deterministic (ML-DSA.KeyGen_internal, Alg. 6).
     """
     keygen() = ((pk, sk) = L.dilithium_keygen(); (; public_key = pk, secret_key = sk))
-    keygen(seed::Vector{UInt8}) = ((pk, sk) = L.dilithium_keygen_derand(seed); (; public_key = pk, secret_key = sk))
+    keygen(seed::ByteVec) = with_vector(seed) do s
+        pk, sk = L.dilithium_keygen_derand(s); (; public_key = pk, secret_key = sk)
+    end
 
     """
         sign(secret_key, message; context = UInt8[], hedged = true) -> signature
@@ -93,37 +121,38 @@ for (name, level) in ((:MLDSA44, :Category2), (:MLDSA65, :Category3), (:MLDSA87,
     `hedged = false` is the deterministic variant. A 32-byte `rnd` fixes the randomness.
     `context` is at most 255 bytes.
     """
-    sign(secret_key::Vector{UInt8}, message::Vector{UInt8}; context::Vector{UInt8} = UInt8[], hedged::Bool = true) =
-        L.dilithium_sign(message, secret_key; hedged, context)
-    sign(secret_key::Vector{UInt8}, message::Vector{UInt8}, rnd::Vector{UInt8}; context::Vector{UInt8} = UInt8[]) =
-        L.dilithium_sign_derand(message, secret_key, rnd; context)
+    sign(secret_key::ByteVec, message::ByteVec; context::ByteVec = UInt8[], hedged::Bool = true) =
+        with_vector((sk, m, c) -> L.dilithium_sign(m, sk; hedged, context = c), secret_key, message, context)
+    sign(secret_key::ByteVec, message::ByteVec, rnd::ByteVec; context::ByteVec = UInt8[]) =
+        with_vector((sk, m, r, c) -> L.dilithium_sign_derand(m, sk, r; context = c), secret_key, message, rnd, context)
 
     """
         verify(public_key, message, signature; context = UInt8[]) -> Bool
 
     ML-DSA.Verify (FIPS 204 Alg. 3), pure mode. Malformed inputs return `false`.
     """
-    verify(public_key::Vector{UInt8}, message::Vector{UInt8}, signature::Vector{UInt8}; context::Vector{UInt8} = UInt8[]) =
-        L.dilithium_verify(message, signature, public_key; context)
+    verify(public_key::ByteVec, message::ByteVec, signature::ByteVec; context::ByteVec = UInt8[]) =
+        with_vector((pk, m, s, c) -> L.dilithium_verify(m, s, pk; context = c), public_key, message, signature, context)
 
     """
         sign_prehash(secret_key, message, hash; context = UInt8[], hedged = true) -> signature
+        sign_prehash(secret_key, message, hash, rnd; context = UInt8[]) -> signature
 
     HashML-DSA.Sign (FIPS 204 Alg. 4). `hash` names the pre-hash function, e.g. `"SHA2-256"`,
-    `"SHA2-512"`, `"SHA3-256"`, `"SHAKE-128"`, `"SHAKE-256"`.
+    `"SHA2-512"`, `"SHA3-256"`, `"SHAKE-128"`, `"SHAKE-256"`. A 32-byte `rnd` fixes the randomness.
     """
-    sign_prehash(secret_key::Vector{UInt8}, message::Vector{UInt8}, hash::String;
-                 context::Vector{UInt8} = UInt8[], hedged::Bool = true) =
-        L.dilithium_sign_prehash(message, secret_key, hash; hedged, context)
+    sign_prehash(secret_key::ByteVec, message::ByteVec, hash::String; context::ByteVec = UInt8[], hedged::Bool = true) =
+        with_vector((sk, m, c) -> L.dilithium_sign_prehash(m, sk, hash; hedged, context = c), secret_key, message, context)
+    sign_prehash(secret_key::ByteVec, message::ByteVec, hash::String, rnd::ByteVec; context::ByteVec = UInt8[]) =
+        with_vector((sk, m, r, c) -> L.dilithium_sign_prehash_derand(m, sk, hash, r; context = c), secret_key, message, rnd, context)
 
     """
         verify_prehash(public_key, message, signature, hash; context = UInt8[]) -> Bool
 
-    HashML-DSA.Verify (FIPS 204 Alg. 5).
+    HashML-DSA.Verify (FIPS 204 Alg. 5). Malformed inputs return `false`.
     """
-    verify_prehash(public_key::Vector{UInt8}, message::Vector{UInt8}, signature::Vector{UInt8}, hash::String;
-                   context::Vector{UInt8} = UInt8[]) =
-        L.dilithium_verify_prehash(message, signature, public_key, hash; context)
+    verify_prehash(public_key::ByteVec, message::ByteVec, signature::ByteVec, hash::String; context::ByteVec = UInt8[]) =
+        with_vector((pk, m, s, c) -> L.dilithium_verify_prehash(m, s, pk, hash; context = c), public_key, message, signature, context)
     end
 end
 

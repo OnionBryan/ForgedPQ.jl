@@ -31,7 +31,7 @@ types throw `ArgumentError`. Returns `x` for one argument, `nothing` for several
 function wipe!(x::Array{T}) where {T}
     isbitstype(T) || throw(ArgumentError("wipe! needs plain-data elements, got $T"))
     GC.@preserve x begin
-        p = Ptr{Cvoid}(pointer(x))
+        p = Ptr{Cvoid}(pointer(x))::Ptr{Cvoid}
         ccall(:memset, Ptr{Cvoid}, (Ptr{Cvoid}, Cint, Csize_t), p, 0, sizeof(x))
         barrier(p)
     end
@@ -45,8 +45,8 @@ wipe!(x::Vector{<:Array}) = (foreach(wipe!, x); x)
 storage(x::AbstractArray) = (p = parent(x); p === x ? x : storage(p))
 writable(::Union{DenseStorage, BitArray}) = true
 writable(_) = false
-base_pointer(s::DenseStorage) = Ptr{Cvoid}(pointer(s))
-base_pointer(s::BitArray) = Ptr{Cvoid}(pointer(s.chunks))
+base_pointer(s::DenseStorage) = Ptr{Cvoid}(pointer(s))::Ptr{Cvoid}
+base_pointer(s::BitArray) = Ptr{Cvoid}(pointer(s.chunks))::Ptr{Cvoid}
 
 # Contiguous memory is cleared with memset over its element stride (Base.elsize, which exceeds
 # sizeof(T) for padded types); any other array of numbers is zeroed element by element. In both
