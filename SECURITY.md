@@ -55,6 +55,17 @@ Source-level constant-time code is checked after compilation, on every CI run:
 - `test/fuzz.jl` feeds random bytes at boundary and random lengths to every public operation;
   each must return normally or throw `ArgumentError`.
 
+### Measured timing (dudect)
+
+2026-10-25, Intel Core i7-8086K (x86-64), Julia 1.12.5, `test/timing/dudect.jl` at 100,000
+samples per test: all 22 tests below the |t| = 4.5 threshold (largest 4.22, ML-KEM-768
+decapsulation of valid vs tampered ciphertexts). That test was repeated at 10,000,000 samples with
+both classes freshly random valid ciphertexts, one class tampered: |t| = 1.2 and 1.8 in two runs,
+with mean differences under 2 ns at every crop. A constant difference grows |t| with √N; this one
+did not, so decapsulation time does not distinguish valid from tampered ciphertexts at that
+resolution. Comparing a fixed ciphertext with varied ones does give |t| ≈ 10 at 10⁶ samples — the
+cache effect of repeating identical input described in the README, not a property of the code.
+
 ### Variable-time
 
 | Operation | Note |
