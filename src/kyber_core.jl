@@ -1,0 +1,670 @@
+"""
+    kyber.jl -- Core Kyber (CRYSTALS-Kyber) number-theoretic transform math,
+    CBD sampling, poly operations, compress/decompress, encode/decode,
+    and constant-time utilities.
+
+    Port of pq-crystals/kyber/ref: reduce.c, ntt.c, cbd.c, poly.c, verify.c
+    Constants from params.h, reduce.h, ntt.c
+
+    All arithmetic follows the C reference exactly, using `% Int16` for
+    truncation (never `Int16()` which throws on overflow).
+"""
+
+import ..Keccak
+
+# ── Constants ────────────────────────────────────────────────────────────────
+
+const KYBER_N    = 256
+const KYBER_Q    = Int16(3329)
+const KYBER_MONT = Int16(-1044)   # 2^16 mod q  (centered representation)
+const KYBER_QINV = Int16(-3327)   # q^{-1} mod 2^16  (signed)
+
+# Precomputed zetas for NTT, hardcoded from pq-crystals/kyber/ref/ntt.c:39-56.
+# 128 entries; Julia 1-indexed so zetas[1] = C's zetas[0] = -1044.
+const KYBER_ZETAS = Int16[
+    -1044,  -758,  -359, -1517,  1493,  1422,   287,   202,
+     -171,   622,  1577,   182,   962, -1202, -1474,  1468,
+      573, -1325,   264,   383,  -829,  1458, -1602,  -130,
+     -681,  1017,   732,   608, -1542,   411,  -205, -1571,
+     1223,   652,  -552,  1015, -1293,  1491,  -282, -1544,
+      516,    -8,  -320,  -666, -1618, -1162,   126,  1469,
+     -853,   -90,  -271,   830,   107, -1421,  -247,  -951,
+     -398,   961, -1508,  -725,   448, -1065,   677, -1275,
+    -1103,   430,   555,   843, -1251,   871,  1550,   105,
+      422,   587,   177,  -235,  -291,  -460,  1574,  1653,
+     -246,   778,  1159,  -147,  -777,  1483,  -602,  1119,
+    -1590,   644,  -872,   349,   418,   329,  -156,   -75,
+      817,  1097,   603,   610,  1322, -1285, -1465,   384,
+    -1215,  -136,  1218, -1335,  -874,   220, -1187, -1659,
+    -1185, -1530, -1278,   794, -1510,  -854,  -870,   478,
+     -108,  -308,   996,   991,   958, -1460,  1522,  1628
+]
+
+# ── Montgomery Reduce ────────────────────────────────────────────────────────
+# Input:  a in Int32 with |a| ≤ 2^30 (any product of two Int16 values)
+# Output: a * R^{-1} mod q in Int16; in {-(q-1), ..., q-1} when -q*2^15 ≤ a < q*2^15
+# Mirrors pq-crystals/kyber/ref/reduce.c:16-23.
+#
+# |t*q| ≤ 2^15 * 3329 < 2^27, so a - t*q stays inside Int32 for |a| ≤ 2^30 and the
+# C code's signed arithmetic does not overflow. Every caller is fqmul on a twiddle,
+# a Montgomery constant (|ζ|, 1353, 1441 ≤ 1664, against any Int16) or a basemul
+# operand (≤ 4095), so |a| ≤ max(1664*2^15, 4095^2) < q*2^15: inside the C reference's
+# range {-q*2^15, ..., q*2^15-1}, on which the result is already centered.
+
+@inline function montgomery_reduce(a::Int32)::Int16
+    t = (a % Int16) * KYBER_QINV              # truncate to Int16, multiply (wraps)
+    u = (a - Int32(t) * Int32(KYBER_Q)) >> 16
+    return u % Int16
+end
+
+# ── fqmul ────────────────────────────────────────────────────────────────────
+# Multiplication followed by Montgomery reduction.
+
+@inline function fqmul(a::Int16, b::Int16)::Int16
+    return montgomery_reduce(Int32(a) * Int32(b))
+end
+
+# ── Barrett Reduce ───────────────────────────────────────────────────────────
+# Input:  a in Int16
+# Output: a mod q, centered in {-(q-1)/2, ..., (q-1)/2}
+# Mirrors pq-crystals/kyber/ref/reduce.c:35-42.
+
+@inline function barrett_reduce(a::Int16)::Int16
+    v = Int16(20159)   # floor((1<<26 + q/2) / q)
+    t = ((Int32(v) * Int32(a) + (Int32(1) << 25)) >> 26) % Int16
+    t = (Int32(t) * Int32(KYBER_Q)) % Int16
+    return a - t
+end
+
+# ── Forward NTT (in-place) ───────────────────────────────────────────────────
+# Mirrors pq-crystals/kyber/ref/ntt.c:80-95.
+# C starts k=1 (post-increment); Julia 1-indexed so k starts at 2.
+# No Barrett reduce in the forward direction.
+
+function kyber_ntt!(r::Vector{Int16})
+    checkbounds(r, 1:KYBER_N)
+    k = 2   # Julia's zetas[2] = C's zetas[1]
+    len = 128
+    while len >= 2
+        start = 0
+        while start < 256
+            zeta = @inbounds KYBER_ZETAS[k]
+            k += 1
+            @inbounds for j in start:(start + len - 1)
+                t = fqmul(zeta, r[j + len + 1])    # +1 for 1-indexing
+                r[j + len + 1] = r[j + 1] - t
+                r[j + 1]       = r[j + 1] + t
+            end
+            start += 2 * len
+        end
+        len >>= 1
+    end
+    return r
+end
+
+# ── Inverse NTT (in-place) ──────────────────────────────────────────────────
+# Mirrors pq-crystals/kyber/ref/ntt.c:106-126.
+# C starts k=127 (post-decrement); Julia 1-indexed so k starts at 128.
+# Barrett reduce on the addition.  Final scaling by f = 1441 = mont^2/128.
+
+function kyber_invntt!(r::Vector{Int16})
+    checkbounds(r, 1:KYBER_N)
+    f = Int16(1441)
+    k = 128  # Julia's zetas[128] = C's zetas[127]
+    len = 2
+    while len <= 128
+        start = 0
+        while start < 256
+            zeta = @inbounds KYBER_ZETAS[k]
+            k -= 1
+            @inbounds for j in start:(start + len - 1)
+                t = r[j + 1]
+                r[j + 1]       = barrett_reduce(t + r[j + len + 1])
+                r[j + len + 1] = r[j + len + 1] - t
+                r[j + len + 1] = fqmul(zeta, r[j + len + 1])
+            end
+            start += 2 * len
+        end
+        len <<= 1
+    end
+    @inbounds for j in 1:256
+        r[j] = fqmul(r[j], f)
+    end
+    return r
+end
+
+# ── Basemul ──────────────────────────────────────────────────────────────────
+# Multiply two degree-1 polynomials in Z_q[X]/(X^2 - zeta).
+# Mirrors pq-crystals/kyber/ref/ntt.c:139-146.
+# r, a, b are length-2 views (or any AbstractVector{Int16}).
+
+function kyber_basemul!(r::AbstractVector{Int16}, a::AbstractVector{Int16},
+                        b::AbstractVector{Int16}, zeta::Int16)
+    r[1]  = fqmul(a[2], b[2])
+    r[1]  = fqmul(r[1], zeta)
+    r[1] += fqmul(a[1], b[1])
+    r[2]  = fqmul(a[1], b[2])
+    r[2] += fqmul(a[2], b[1])
+    return r
+end
+
+# ── Additional Constants ────────────────────────────────────────────────────
+
+const KYBER_SYMBYTES = 32
+const KYBER_POLYBYTES = 384       # 256 * 12 / 8
+
+# ── CBD — Centered Binomial Distribution ────────────────────────────────────
+# Port of pq-crystals/kyber/ref/cbd.c
+# cbd2: eta=2, 128 bytes → 256 coefficients in [-2, 2]
+# cbd3: eta=3, 192 bytes → 256 coefficients in [-3, 3]
+
+"""
+    kyber_cbd2!(r, buf)
+
+Centered binomial distribution with eta=2.
+`buf` must have at least 128 bytes (2*KYBER_N/4).
+`r` must be a Vector{Int16} of length >= 256.
+Produces coefficients in [-2, 2].
+"""
+function kyber_cbd2!(r::Vector{Int16}, buf::Vector{UInt8})
+    checkbounds(r, 1:KYBER_N); checkbounds(buf, 1:2KYBER_N÷4)
+    @inbounds for i in 0:(KYBER_N ÷ 8 - 1)   # 0:31
+        t = UInt32(buf[4i + 1]) |
+            (UInt32(buf[4i + 2]) << 8) |
+            (UInt32(buf[4i + 3]) << 16) |
+            (UInt32(buf[4i + 4]) << 24)
+        d = t & 0x55555555
+        d += (t >> 1) & 0x55555555
+        for j in 0:7
+            a = (d >> (4j)) & 0x3
+            b = (d >> (4j + 2)) & 0x3
+            r[8i + j + 1] = (a % Int16) - (b % Int16)
+        end
+    end
+    return r
+end
+
+"""
+    kyber_cbd3!(r, buf)
+
+Centered binomial distribution with eta=3.
+`buf` must have at least 192 bytes (3*KYBER_N/4).
+`r` must be a Vector{Int16} of length >= 256.
+Produces coefficients in [-3, 3].
+"""
+function kyber_cbd3!(r::Vector{Int16}, buf::Vector{UInt8})
+    checkbounds(r, 1:KYBER_N); checkbounds(buf, 1:3KYBER_N÷4)
+    @inbounds for i in 0:(KYBER_N ÷ 4 - 1)   # 0:63
+        t = UInt32(buf[3i + 1]) |
+            (UInt32(buf[3i + 2]) << 8) |
+            (UInt32(buf[3i + 3]) << 16)
+        d = t & 0x00249249
+        d += (t >> 1) & 0x00249249
+        d += (t >> 2) & 0x00249249
+        for j in 0:3
+            a = (d >> (6j)) & 0x7
+            b = (d >> (6j + 3)) & 0x7
+            r[4i + j + 1] = (a % Int16) - (b % Int16)
+        end
+    end
+    return r
+end
+
+# ── PRF / XOF / Hash Wrappers ──────────────────────────────────────────────
+# SHAKE-128, SHAKE-256, SHA3-256 and SHA3-512 from Keccak (keccak.jl).
+
+"""PRF: SHAKE-256(seed || nonce, outlen). The seed is secret (σ or r): the input copy is wiped."""
+function kyber_prf(seed::Vector{UInt8}, nonce::UInt8, outlen::Int)
+    inp = catbytes(seed, nonce)
+    try
+        return Keccak.shake256(inp, UInt64(outlen))
+    finally
+        wipe!(inp)
+    end
+end
+
+"""XOF: SHAKE-128(seed, outlen)"""
+function kyber_xof(seed::Vector{UInt8}, outlen::Int)
+    return Keccak.shake128(seed, UInt64(outlen))
+end
+
+"""Hash H: SHA3-256"""
+function kyber_hash_h(data::AbstractVector{UInt8})
+    return Keccak.sha3_256(data)
+end
+
+"""Hash G: SHA3-512"""
+function kyber_hash_g(data::AbstractVector{UInt8})
+    return Keccak.sha3_512(data)
+end
+
+# ── Uniform Sampling (Rejection Sampling) ──────────────────────────────────
+# Port of pq-crystals/kyber/ref/indcpa.c:rej_uniform
+# 3 bytes → two 12-bit values, reject >= q.
+
+"""
+    kyber_rej_uniform!(r, buf) -> ctr
+
+Rejection-sample uniform coefficients mod q from random bytes.
+Returns the number of valid coefficients produced.
+"""
+kyber_rej_uniform!(r::AbstractVector{Int16}, buf::Vector{UInt8}) = kyber_rej_uniform!(r, 0, buf, length(buf))
+
+# Continues at r[ctr+1] with the bytes buf[1:buflen]; returns the new count.
+function kyber_rej_uniform!(r::AbstractVector{Int16}, ctr::Int, buf::Vector{UInt8}, buflen::Int)
+    len = length(r)
+    checkbounds(r, 1:len); checkbounds(buf, 1:buflen)
+    pos = 1  # Julia 1-indexed
+    @inbounds while ctr < len && pos + 2 <= buflen
+        val0 = (UInt16(buf[pos]) | (UInt16(buf[pos + 1]) << 8)) & 0x0FFF
+        val1 = ((UInt16(buf[pos + 1]) >> 4) | (UInt16(buf[pos + 2]) << 4)) & 0x0FFF
+        pos += 3
+        if val0 < UInt16(KYBER_Q)
+            ctr += 1
+            r[ctr] = val0 % Int16
+        end
+        if ctr < len && val1 < UInt16(KYBER_Q)
+            ctr += 1
+            r[ctr] = val1 % Int16
+        end
+    end
+    return ctr
+end
+
+"""
+    kyber_sample_uniform!(r, seed, i, j)
+
+Sample a full polynomial (256 coeffs) uniformly mod q using SHAKE-128
+seeded with seed||i||j.  Uses rejection sampling.
+"""
+function kyber_sample_uniform!(r::AbstractVector{Int16}, seed::Vector{UInt8},
+                               i::UInt8, j::UInt8,
+                               inp::Vector{UInt8} = Vector{UInt8}(undef, length(seed) + 2),
+                               blk::Vector{UInt8} = Vector{UInt8}(undef, Keccak.SHAKE128_RATE))
+    # SHAKE-128(ρ ‖ i ‖ j) squeezed one block at a time (C ref: indcpa.c:gen_matrix). The rate,
+    # 168 bytes, is a multiple of 3, so no 3-byte group straddles two blocks. All public.
+    length(r) == KYBER_N || throw(ArgumentError("r must have $KYBER_N coefficients"))
+    length(inp) == length(seed) + 2 || throw(ArgumentError("inp must be $(length(seed) + 2) bytes"))
+    copyto!(inp, seed); inp[end-1] = i; inp[end] = j
+    st = Keccak.shake128_absorb(inp)
+    ctr = 0
+    while true
+        Keccak.squeeze_block!(blk, st, Keccak.SHAKE128_RATE)
+        ctr = kyber_rej_uniform!(r, ctr, blk, Keccak.SHAKE128_RATE)
+        ctr == KYBER_N && return r
+        st = Keccak.keccak_f1600(st)
+    end
+end
+
+# ── Poly Arithmetic Operations ─────────────────────────────────────────────
+# Port of pq-crystals/kyber/ref/poly.c: poly_add, poly_sub, poly_reduce, poly_tomont
+
+"""Coefficient-wise addition, no modular reduction."""
+function kyber_poly_add!(r::Vector{Int16}, a::Vector{Int16}, b::Vector{Int16})
+    @inbounds for i in 1:KYBER_N
+        r[i] = a[i] + b[i]
+    end
+    return r
+end
+
+"""Coefficient-wise subtraction, no modular reduction."""
+function kyber_poly_sub!(r::Vector{Int16}, a::Vector{Int16}, b::Vector{Int16})
+    @inbounds for i in 1:KYBER_N
+        r[i] = a[i] - b[i]
+    end
+    return r
+end
+
+"""Barrett-reduce every coefficient."""
+function kyber_poly_reduce!(r::Vector{Int16})
+    @inbounds for i in 1:KYBER_N
+        r[i] = barrett_reduce(r[i])
+    end
+    return r
+end
+
+"""
+    kyber_poly_tomont!(r)
+
+Convert polynomial to Montgomery domain by multiplying each coefficient
+by R^2 mod q = (2^32 mod q) = 1353, via fqmul.
+Mirrors poly.c:poly_tomont.
+"""
+function kyber_poly_tomont!(r::Vector{Int16})
+    f = Int16(1353)   # (1ULL << 32) % KYBER_Q
+    @inbounds for i in 1:KYBER_N
+        r[i] = fqmul(r[i], f)
+    end
+    return r
+end
+
+"""
+    kyber_poly_basemul_montgomery!(r, a, b)
+
+Full 256-coefficient pointwise multiply in NTT domain.
+Uses basemul on 64 pairs of degree-1 polynomials,
+with alternating +/- zetas from KYBER_ZETAS[65:128].
+Mirrors poly.c:poly_basemul_montgomery.
+"""
+function kyber_poly_basemul_montgomery!(r::Vector{Int16},
+                                        a::AbstractVector{Int16},
+                                        b::Vector{Int16})
+    # C: for(i=0;i<N/4;i++) {
+    #   basemul(&r[4i], &a[4i], &b[4i], zetas[64+i]);
+    #   basemul(&r[4i+2], &a[4i+2], &b[4i+2], -zetas[64+i]);
+    # }
+    # Julia 1-indexed: zetas[64+i] in C = KYBER_ZETAS[65+i] in Julia.
+    # kyber_basemul! inlined on scalars: the same fqmul sequence, no SubArrays.
+    checkbounds(r, 1:KYBER_N); checkbounds(a, 1:KYBER_N); checkbounds(b, 1:KYBER_N)
+    @inbounds for i in 0:(KYBER_N ÷ 4 - 1)   # 0:63
+        z = KYBER_ZETAS[65 + i]     # C's zetas[64+i]
+        for (o, zz) in ((4i + 1, z), (4i + 3, -z))
+            a0, a1, b0, b1 = a[o], a[o + 1], b[o], b[o + 1]
+            r[o]     = fqmul(fqmul(a1, b1), zz) + fqmul(a0, b0)
+            r[o + 1] = fqmul(a0, b1) + fqmul(a1, b0)
+        end
+    end
+    return r
+end
+
+# ── Conditional Add Q (caddq) ──────────────────────────────────────────────
+# Maps potentially negative centered representative to [0, q).
+# a += (a >> 15) & q
+
+@inline function caddq(a::Int16)::Int16
+    a += (a >> 15) & KYBER_Q
+    return a
+end
+
+# ── Compress / Decompress ──────────────────────────────────────────────────
+# Port of pq-crystals/kyber/ref/poly.c: poly_compress / poly_decompress
+# Generic d-bit versions plus the specific d=4 and d=5 optimized versions.
+
+"""
+    kyber_decompress(y, d) -> Int16
+
+Decompress: maps y in [0, 2^d) back to round(y * q / 2^d).
+"""
+function kyber_decompress(y::UInt16, d::Int)::Int16
+    return ((UInt32(y) * UInt32(KYBER_Q) + UInt32(1 << (d - 1))) >> d) % Int16
+end
+
+"""
+    kyber_poly_compress!(r_bytes, a, d)
+
+Compress and serialize a polynomial with d bits per coefficient.
+d=4: 256 coefficients → 128 bytes
+d=5: 256 coefficients → 160 bytes
+Mirrors poly.c:poly_compress.
+"""
+function kyber_poly_compress!(r_bytes::AbstractVector{UInt8}, a::Vector{Int16}, d::Int)
+    checkbounds(a, 1:KYBER_N)
+    if d == 4
+        # 8 coefficients → 4 bytes (4 bits each, packed in pairs)
+        checkbounds(r_bytes, firstindex(r_bytes):firstindex(r_bytes) + 127)
+        idx = firstindex(r_bytes)
+        @inbounds for i in 0:(KYBER_N ÷ 8 - 1)
+            # Optimized Barrett-style: (u << 4) + 1665, * 80635, >> 28
+            # Use `% UInt32` to match C's silent int16_t → uint32_t conversion
+            # (UInt32(u) would throw InexactError on negative Int16)
+            t = ntuple(j -> ((((caddq(a[8i + j]) % UInt32) << 4 + 1665) * 80635) >> 28) % UInt8 & 0x0f, Val(8))
+            r_bytes[idx]     = t[1] | (t[2] << 4)
+            r_bytes[idx + 1] = t[3] | (t[4] << 4)
+            r_bytes[idx + 2] = t[5] | (t[6] << 4)
+            r_bytes[idx + 3] = t[7] | (t[8] << 4)
+            idx += 4
+        end
+    elseif d == 5
+        # 8 coefficients → 5 bytes (5 bits each)
+        checkbounds(r_bytes, firstindex(r_bytes):firstindex(r_bytes) + 159)
+        idx = firstindex(r_bytes)
+        @inbounds for i in 0:(KYBER_N ÷ 8 - 1)
+            # (u << 5) + 1664, * 40318, >> 27; `% UInt32` as C's int16_t → uint32_t
+            t = ntuple(j -> ((((caddq(a[8i + j]) % UInt32) << 5 + 1664) * 40318) >> 27) % UInt8 & 0x1f, Val(8))
+            r_bytes[idx]     = t[1] | (t[2] << 5)
+            r_bytes[idx + 1] = (t[2] >> 3) | (t[3] << 2) | (t[4] << 7)
+            r_bytes[idx + 2] = (t[4] >> 1) | (t[5] << 4)
+            r_bytes[idx + 3] = (t[5] >> 4) | (t[6] << 1) | (t[7] << 6)
+            r_bytes[idx + 4] = (t[7] >> 2) | (t[8] << 3)
+            idx += 5
+        end
+    else
+        error("kyber_poly_compress!: unsupported d=$d (must be 4 or 5)")
+    end
+    return r_bytes
+end
+
+"""
+    kyber_poly_decompress!(r, a_bytes, d)
+
+Deserialize and decompress a polynomial from d-bit packed representation.
+d=4: 128 bytes → 256 coefficients
+d=5: 160 bytes → 256 coefficients
+Mirrors poly.c:poly_decompress.
+"""
+function kyber_poly_decompress!(r::Vector{Int16}, a_bytes::AbstractVector{UInt8}, d::Int)
+    checkbounds(r, 1:KYBER_N)
+    o = firstindex(a_bytes) - 1
+    if d == 4
+        # 1 byte → 2 coefficients (low 4 bits, high 4 bits)
+        checkbounds(a_bytes, o + 1:o + 128)
+        @inbounds for i in 0:(KYBER_N ÷ 2 - 1)
+            r[2i + 1] = (((UInt16(a_bytes[o + i + 1] & 0x0f) * UInt16(KYBER_Q)) + 8) >> 4) % Int16
+            r[2i + 2] = (((UInt16(a_bytes[o + i + 1] >> 4) * UInt16(KYBER_Q)) + 8) >> 4) % Int16
+        end
+    elseif d == 5
+        # 5 bytes → 8 coefficients
+        checkbounds(a_bytes, o + 1:o + 160)
+        idx = o + 1
+        @inbounds for i in 0:(KYBER_N ÷ 8 - 1)
+            t = (a_bytes[idx],
+                 (a_bytes[idx] >> 5) | (a_bytes[idx + 1] << 3),
+                 a_bytes[idx + 1] >> 2,
+                 (a_bytes[idx + 1] >> 7) | (a_bytes[idx + 2] << 1),
+                 (a_bytes[idx + 2] >> 4) | (a_bytes[idx + 3] << 4),
+                 a_bytes[idx + 3] >> 1,
+                 (a_bytes[idx + 3] >> 6) | (a_bytes[idx + 4] << 2),
+                 a_bytes[idx + 4] >> 3)
+            idx += 5
+            for j in 1:8
+                r[8i + j] = ((UInt32(t[j] & 0x1f) * UInt32(KYBER_Q) + 16) >> 5) % Int16
+            end
+        end
+    else
+        error("kyber_poly_decompress!: unsupported d=$d (must be 4 or 5)")
+    end
+    return r
+end
+
+# ── Encode / Decode (12-bit Bitpacking) ────────────────────────────────────
+# Port of pq-crystals/kyber/ref/poly.c: poly_tobytes / poly_frombytes
+
+"""
+    kyber_poly_tobytes!(r, a)
+
+Serialize polynomial to bytes: 256 coefficients → 384 bytes (12 bits each).
+Coefficients are mapped to positive standard representatives first.
+Mirrors poly.c:poly_tobytes.
+"""
+function kyber_poly_tobytes!(r::AbstractVector{UInt8}, a::Vector{Int16})
+    o = firstindex(r) - 1
+    checkbounds(a, 1:KYBER_N); checkbounds(r, o + 1:o + KYBER_POLYBYTES)
+    @inbounds for i in 0:(KYBER_N ÷ 2 - 1)
+        # Map to positive standard representatives
+        # Use `% UInt16` to match C's silent int16_t → uint16_t conversion
+        t0 = caddq(a[2i + 1]) % UInt16
+        t1 = caddq(a[2i + 2]) % UInt16
+        r[o + 3i + 1] = (t0) % UInt8
+        r[o + 3i + 2] = ((t0 >> 8) | (t1 << 4)) % UInt8
+        r[o + 3i + 3] = (t1 >> 4) % UInt8
+    end
+    return r
+end
+
+"""
+    kyber_poly_frombytes!(r, a)
+
+Deserialize polynomial from bytes: 384 bytes → 256 coefficients (12 bits each).
+Mirrors poly.c:poly_frombytes.
+"""
+function kyber_poly_frombytes!(r::Vector{Int16}, a::AbstractVector{UInt8})
+    o = firstindex(a) - 1
+    checkbounds(r, 1:KYBER_N); checkbounds(a, o + 1:o + KYBER_POLYBYTES)
+    @inbounds for i in 0:(KYBER_N ÷ 2 - 1)
+        r[2i + 1] = ((UInt16(a[o + 3i + 1]) | (UInt16(a[o + 3i + 2]) << 8)) & 0x0FFF) % Int16
+        r[2i + 2] = (((UInt16(a[o + 3i + 2]) >> 4) | (UInt16(a[o + 3i + 3]) << 4)) & 0x0FFF) % Int16
+    end
+    return r
+end
+
+# ── Message Encode / Decode ────────────────────────────────────────────────
+# Port of pq-crystals/kyber/ref/poly.c: poly_frommsg / poly_tomsg
+
+"""
+    kyber_poly_frommsg!(r, msg)
+
+Convert 32-byte message to polynomial.
+Each bit → 0 or (q+1)/2 = 1665.
+Mirrors poly.c:poly_frommsg (uses cmov_int16 for constant-time).
+"""
+function kyber_poly_frommsg!(r::Vector{Int16}, msg::Vector{UInt8})
+    half_q = Int16((Int(KYBER_Q) + 1) ÷ 2)   # 1665
+    checkbounds(r, 1:KYBER_N); checkbounds(msg, 1:KYBER_N ÷ 8)
+    @inbounds for i in 0:(KYBER_N ÷ 8 - 1)
+        for j in 0:7
+            bit = (msg[i + 1] >> j) & 0x01
+            # Constant-time: use mask instead of branch
+            mask = -(Int16(bit))   # 0x0000 or 0xFFFF
+            r[8i + j + 1] = mask & half_q
+        end
+    end
+    return r
+end
+
+"""
+    kyber_poly_tomsg!(msg, a)
+
+Convert polynomial to 32-byte message.
+Each coefficient → round(2*coeff/q) & 1.
+Uses the Barrett-style trick from the C reference.
+Mirrors poly.c:poly_tomsg.
+"""
+function kyber_poly_tomsg!(msg::Vector{UInt8}, a::Vector{Int16})
+    checkbounds(a, 1:KYBER_N); checkbounds(msg, 1:KYBER_N ÷ 8)
+    @inbounds for i in 0:(KYBER_N ÷ 8 - 1)
+        msg[i + 1] = 0x00
+        for j in 0:7
+            # C reference does NOT call caddq here -- the Barrett-style trick
+            # is designed to work on raw (possibly negative) int16_t values.
+            # Use `% UInt32` to match C's silent int16_t → uint32_t assignment
+            # which sign-extends then reinterprets as unsigned.
+            t = a[8i + j + 1] % UInt32
+            # Barrett-style: (t << 1) + 1665, * 80635, >> 28, & 1
+            t <<= 1
+            t += 1665
+            t *= 80635
+            t >>= 28
+            t &= 1
+            msg[i + 1] |= UInt8(t) << j
+        end
+    end
+    return msg
+end
+
+# ── Constant-Time Utilities ────────────────────────────────────────────────
+# Port of pq-crystals/kyber/ref/verify.c
+
+"""
+    kyber_verify(a, b) -> Int
+
+Constant-time comparison of two byte arrays.
+Returns 0 if equal, 1 if different.
+Mirrors verify.c:verify.
+"""
+function kyber_verify(a::Vector{UInt8}, b::Vector{UInt8})::Int
+    @assert length(a) == length(b)
+    r = UInt8(0)
+    @inbounds for i in 1:length(a)
+        r |= a[i] ⊻ b[i]
+    end
+    # (-(UInt64(r))) >>> 63: maps 0→0, nonzero→1
+    return Int((-UInt64(r)) >>> 63)
+end
+
+"""
+    kyber_cmov!(r, x, b)
+
+Constant-time conditional copy: if b==1, copy x into r; if b==0, do nothing.
+b must be in {0, 1}. Uses XOR-mask trick for constant-time behavior.
+Mirrors verify.c:cmov.
+"""
+function kyber_cmov!(r::Vector{UInt8}, x::Vector{UInt8}, b::UInt8)
+    @assert length(r) == length(x)
+    mask = -b   # 0x00 or 0xFF (two's complement wrapping for UInt8)
+    @inbounds for i in 1:length(r)
+        r[i] ⊻= mask & (r[i] ⊻ x[i])
+    end
+    return r
+end
+
+"""
+    kyber_cmov_int16(r_val, v, b) -> Int16
+
+Constant-time conditional select: returns v if b==1, r_val if b==0.
+b must be in {0, 1}.
+Mirrors verify.c:cmov_int16.
+"""
+function kyber_cmov_int16(r_val::Int16, v::Int16, b::UInt16)::Int16
+    mask = (-(b % Int16)) % Int16
+    return r_val ⊻ (mask & (r_val ⊻ v))
+end
+
+# ── Noise Sampling Wrappers ────────────────────────────────────────────────
+
+"""
+    kyber_poly_getnoise_eta2!(r, seed, nonce)
+
+Sample noise polynomial with eta=2 from PRF(seed, nonce).
+"""
+function kyber_poly_getnoise_eta2!(r::Vector{Int16}, seed::Vector{UInt8}, nonce::UInt8,
+                                   inp::Vector{UInt8} = Vector{UInt8}(undef, length(seed) + 1),
+                                   buf::Vector{UInt8} = Vector{UInt8}(undef, 2 * KYBER_N ÷ 4))
+    try
+        kyber_prf!(buf, inp, seed, nonce, 2 * KYBER_N ÷ 4)   # eta2*N/4 = 128 bytes
+        return kyber_cbd2!(r, buf)
+    finally
+        wipe!(inp, buf)
+    end
+end
+
+# PRF into buf[1:outlen], with `inp` (length(seed) + 1 bytes) as the copy of seed ‖ nonce. Both hold
+# secrets; the noise samplers zero them before returning, and callers passing their own also wipe them.
+function kyber_prf!(buf::Vector{UInt8}, inp::Vector{UInt8}, seed::Vector{UInt8}, nonce::UInt8, outlen::Int)
+    length(inp) == length(seed) + 1 || throw(ArgumentError("inp must be $(length(seed) + 1) bytes"))
+    copyto!(inp, seed); inp[end] = nonce
+    return Keccak.shake256!(buf, inp, outlen)
+end
+
+"""
+    kyber_poly_getnoise_eta1!(r, seed, nonce, eta1)
+
+Sample noise polynomial with given eta from PRF(seed, nonce).
+eta1=2 or eta1=3 depending on Kyber parameter set.
+"""
+function kyber_poly_getnoise_eta1!(r::Vector{Int16}, seed::Vector{UInt8},
+                                   nonce::UInt8, eta1::Int,
+                                   inp::Vector{UInt8} = Vector{UInt8}(undef, length(seed) + 1),
+                                   buf::Vector{UInt8} = Vector{UInt8}(undef, 3 * KYBER_N ÷ 4))
+    (eta1 == 2 || eta1 == 3) || error("eta1 must be 2 or 3, got $eta1")   # before any secret exists
+    try
+        kyber_prf!(buf, inp, seed, nonce, eta1 * KYBER_N ÷ 4)
+        return eta1 == 2 ? kyber_cbd2!(r, buf) : kyber_cbd3!(r, buf)
+    finally
+        wipe!(inp, buf)
+    end
+end
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Task 4: Kyber-768 IND-CPA encryption + CCA2 KEM wrapper
+# Port of pq-crystals/kyber/ref: indcpa.c, kem.c, polyvec.c
+# ══════════════════════════════════════════════════════════════════════════════
