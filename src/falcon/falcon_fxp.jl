@@ -131,12 +131,12 @@ const GAUSS_1024 = UInt16[12,
 
 # prng_buffer: 16-bit little-endian draws from 512-byte chunks of the RNG. Each chunk is a copy of
 # keystream that determines the key: it is zeroed when replaced, and the last one by the owner.
-mutable struct U16Source
-    rng::Any
+mutable struct U16Source{R}
+    rng::R
     buf::Vector{UInt8}
     ptr::Int
 end
-U16Source(rng) = U16Source(rng, UInt8[], 512)
+U16Source(rng::R) where {R} = U16Source{R}(rng, UInt8[], 512)
 function next_u16(s::U16Source)
     if s.ptr > 510
         wipe!(s.buf)

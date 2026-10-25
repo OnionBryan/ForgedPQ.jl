@@ -13,6 +13,7 @@ groups(file, pred) = [g for g in JSON.parsefile(joinpath(KAT_DIR, file))["testGr
 
 # ==================== Keccak (FIPS 202) ====================
 
+include("shake_reader.jl")
 include("keccak.jl")
 
 # ==================== ML-KEM (FIPS 203) ====================
@@ -76,7 +77,7 @@ end
 @testset "ML-KEM rkprf = SHA.jl SHAKE-256(z ‖ c)" begin
     for Cat in (MLKEM.Category1, MLKEM.Category3, MLKEM.Category5), _ in 1:10
         z = rand(UInt8, 32); c = rand(UInt8, 32)
-        @test Cat.kyber_rkprf(z, c) == SHA.shake256(vcat(z, c), UInt64(32))
+        @test Cat.kyber_rkprf(z, c) == oracle_shake256(vcat(z, c), 32)
     end
 end
 
@@ -185,6 +186,10 @@ include("wipe.jl")
 include("regressions_mldsa.jl")
 include("regressions_review.jl")
 include("specialization.jl")
+include("api.jl")
+include("fuzz.jl")
+include("constant_time.jl")
+include("aqua.jl")
 
 @testset "FN-DSA API ($(M.IDENTIFIER))" for M in (FNDSA.Falcon512, FNDSA.Falcon1024)
     pk, sk = M.falcon_keygen()

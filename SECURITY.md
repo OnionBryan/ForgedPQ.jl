@@ -38,6 +38,23 @@ constant-time after compilation.
 | X25519 | Scalar bits from 64-bit words, mask swaps on 51-bit limbs, branch-free canonical encoding | x25519.jl |
 | Falcon signing (key expansion, FFT, ffLDL, ffSampling, SamplerZ) | Integer emulation of binary64 (Pornin's `fpr`): branch-free add, mul, div, sqrt and rounding; no hardware floating point; unmasked | falcon/falcon_fpr.jl |
 
+### Checked in the compiled code
+
+Source-level constant-time code is checked after compilation, on every CI run:
+
+- `test/constant_time.jl` disassembles the 21 arithmetic primitives behind the table above
+  (Montgomery and Barrett reduction, `caddq`, `kyber_cmov_int16`, `power2round`, `decompose`,
+  `make_hint`, the X25519 field operations and Falcon's integer binary64 operations) as compiled on
+  the machine running the tests, x86-64 and AArch64 in CI. None may contain a conditional branch or
+  a call; Falcon's integer `div` and `sqrt` may contain one, the test of their fixed-count loop
+  (55 and 54 iterations).
+- `test/timing/dispatch.jl` (JET) and `test/specialization.jl` reject runtime dispatch on the
+  secret paths, on every supported Julia version. Julia 1.10 and 1.11 compile calls inside a block
+  that ends in `throw` with dynamic dispatch, so secret buffers are wiped before a throwing branch,
+  not inside it.
+- `test/fuzz.jl` feeds random bytes at boundary and random lengths to every public operation;
+  each must return normally or throw `ArgumentError`.
+
 ### Variable-time
 
 | Operation | Note |

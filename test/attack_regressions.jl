@@ -8,6 +8,7 @@
 # Included from runtests.jl, which defines h, groups and KAT_DIR.
 using Random
 import SHA
+isdefined(Main, :oracle_shake256) || include("shake_reader.jl")
 
 # ==================== ML-KEM: FO comparison covers every ciphertext byte ====================
 
@@ -32,7 +33,7 @@ end
             wrong_key = Int[]; m_changed = Int[]
             for (p, bit) in tamper_positions(ct, Cat.KYBER_POLYVECCOMPRESSEDBYTES, Cat.KYBER_DU, Cat.KYBER_DV)
                 c = copy(ct); c[p] ⊻= bit
-                Cat.kyber_kem_dec(c, sk) == SHA.shake256(vcat(z, c), UInt64(32)) || push!(wrong_key, p)
+                Cat.kyber_kem_dec(c, sk) == oracle_shake256(vcat(z, c), 32) || push!(wrong_key, p)
                 Cat.kyber_indcpa_dec(c, skc) == m || push!(m_changed, p)
             end
             @test isempty(wrong_key)                 # K̄ = SHAKE256(z ‖ c′, 32) at all positions
@@ -42,7 +43,7 @@ end
             wrong_key = Int[]
             for v in 0:(1 << dv) - 1
                 c = copy(ct); c[end] = (c[end] & (0xff >> dv)) | UInt8(v << (8 - dv))
-                c == ct || Cat.kyber_kem_dec(c, sk) == SHA.shake256(vcat(z, c), UInt64(32)) || push!(wrong_key, v)
+                c == ct || Cat.kyber_kem_dec(c, sk) == oracle_shake256(vcat(z, c), 32) || push!(wrong_key, v)
             end
             @test isempty(wrong_key)
         end
@@ -59,7 +60,7 @@ end
         wrong_key = Int[]
         for (p, bit) in tamper_positions(ct[1:1088], C.KYBER_POLYVECCOMPRESSEDBYTES, C.KYBER_DU, C.KYBER_DV)
             c = copy(ct); c[p] ⊻= bit
-            ssM = SHA.shake256(vcat(k.skM[end-31:end], c[1:1088]), UInt64(32))
+            ssM = oracle_shake256(vcat(k.skM[end-31:end], c[1:1088]), 32)
             XWing.xwing_decaps(c, sk) == XWing.combiner(ssM, ssX, ctX, k.pkX) || push!(wrong_key, p)
         end
         @test isempty(wrong_key)

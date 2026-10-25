@@ -462,6 +462,12 @@ end
 # ══════════════════════════════════════════════════════════════════════════════
 # sk_kem = sk_cpa || pk || H(pk) || z
 
+"""
+    kyber_kem_keypair_derand(coins) -> (pk, sk)
+
+ML-KEM.KeyGen_internal (FIPS 203 Alg. 16) from 64 bytes `coins` = d ‖ z. Deterministic; for
+testing and key derivation. `sk` is dk_PKE ‖ ek ‖ H(ek) ‖ z.
+"""
 function kyber_kem_keypair_derand(coins::Vector{UInt8})
     length(coins) == 2 * KYBER_SYMBYTES || throw(ArgumentError("keygen coins must be $(2 * KYBER_SYMBYTES) bytes (d ‖ z)"))
     # coins is 2*KYBER_SYMBYTES = 64 bytes
@@ -476,6 +482,11 @@ function kyber_kem_keypair_derand(coins::Vector{UInt8})
     end
 end
 
+"""
+    kyber_kem_keypair() -> (pk, sk)
+
+ML-KEM.KeyGen (FIPS 203 Alg. 19): d and z from the OS CSPRNG (`Random.RandomDevice`).
+"""
 function kyber_kem_keypair()
     coins = rand(Random.RandomDevice(), UInt8, 2 * KYBER_SYMBYTES)
     try
@@ -489,6 +500,12 @@ end
 # CCA2 KEM Encapsulate (kem.c:76 -- crypto_kem_enc_derand)
 # ══════════════════════════════════════════════════════════════════════════════
 
+"""
+    kyber_kem_enc_derand(pk, coins) -> (ct, ss)
+
+ML-KEM.Encaps_internal (FIPS 203 Alg. 17) with the 32-byte message m = `coins`, after the
+encapsulation key check of §7.2 (an invalid `pk` throws `ArgumentError`). Deterministic.
+"""
 function kyber_kem_enc_derand(pk::Vector{UInt8}, coins::Vector{UInt8})
     kyber_ek_check(pk) || throw(ArgumentError("$IDENTIFIER encapsulation key failed the FIPS 203 input check"))
     length(coins) == KYBER_SYMBYTES || throw(ArgumentError("coins must be $KYBER_SYMBYTES bytes"))
@@ -515,6 +532,12 @@ function kyber_kem_enc_derand(pk::Vector{UInt8}, coins::Vector{UInt8})
     end
 end
 
+"""
+    kyber_kem_enc(pk) -> (ct, ss)
+
+ML-KEM.Encaps (FIPS 203 Alg. 20): m from the OS CSPRNG, after the encapsulation key check of
+§7.2 (an invalid `pk` throws `ArgumentError`).
+"""
 function kyber_kem_enc(pk::Vector{UInt8})
     coins = rand(Random.RandomDevice(), UInt8, KYBER_SYMBYTES)
     try
@@ -528,6 +551,13 @@ end
 # CCA2 KEM Decapsulate (kem.c:140 -- crypto_kem_dec)
 # ══════════════════════════════════════════════════════════════════════════════
 
+"""
+    kyber_kem_dec(ct, sk) -> ss
+
+ML-KEM.Decaps (FIPS 203 Alg. 21) after the ciphertext length check and the decapsulation key
+check of §7.3, which throw `ArgumentError`. A ciphertext that fails re-encryption gives the
+implicit-rejection secret J(z ‖ c), selected in constant time.
+"""
 function kyber_kem_dec(ct::Vector{UInt8}, sk::Vector{UInt8})
     length(ct) == KYBER_CIPHERTEXTBYTES || throw(ArgumentError("$IDENTIFIER ciphertext must be $KYBER_CIPHERTEXTBYTES bytes"))
     kyber_dk_check(sk) || throw(ArgumentError("$IDENTIFIER decapsulation key failed the FIPS 203 input check"))

@@ -182,6 +182,28 @@ function poly_chknorm(a::Vector{Int32}, bound::Int32)::Bool
     return false
 end
 
+# ==================== PRE-HASH ====================
+
+# SHA-512/224 and SHA-512/256 (FIPS 180-4 §5.3.6): SHA-512 from their own initial hash values,
+# truncated. SHA.jl provides them only in its later versions (not the SHA stdlib of Julia 1.10/1.11).
+const SHA512_224_IV = UInt64[0x8c3d37c819544da2, 0x73e1996689dcd4d6, 0x1dfab7ae32ff9c82, 0x679dd514582f9fcf,
+                             0x0f6d2b697bd44da8, 0x77e36f7304c48942, 0x3f9d85a86a1d36c8, 0x1112e6ad91d692a1]
+const SHA512_256_IV = UInt64[0x22312194fc2bf72c, 0x9f555fa3c84c64c2, 0x2393b86b6f53b151, 0x963877195940eabd,
+                             0x96283ee2a88effe3, 0xbe5e1e2553863992, 0x2b0199fc2c85b8aa, 0x0eb72ddc81c52ca2]
+function sha512t(msg::Vector{UInt8}, iv::Vector{UInt64}, nbytes::Int)
+    ctx = SHA.SHA2_512_CTX()
+    copyto!(ctx.state, iv)
+    SHA.update!(ctx, msg)
+    return SHA.digest!(ctx)[1:nbytes]
+end
+@static if isdefined(SHA, :sha2_512_224)
+    sha512_224(msg::Vector{UInt8}) = SHA.sha2_512_224(msg)
+    sha512_256(msg::Vector{UInt8}) = SHA.sha2_512_256(msg)
+else
+    sha512_224(msg::Vector{UInt8}) = sha512t(msg, SHA512_224_IV, 28)
+    sha512_256(msg::Vector{UInt8}) = sha512t(msg, SHA512_256_IV, 32)
+end
+
 # ==================== SAMPLING ====================
 
 function poly_uniform!(a::Vector{Int32}, seed::Vector{UInt8}, nonce::UInt16,

@@ -283,9 +283,11 @@ function leafsigma(σ::Fpr, d::Fpr, d2::Fpr=opaque(d))
 end
 
 # `fault` accumulates (OR) the leafsigma differences; the caller decides once, at the end.
-# `leaf` is leafsigma except in tests, which inject a faulty evaluation.
+# `leaf` is leafsigma except in tests, which inject a faulty evaluation. The declared return type
+# carries inference through the recursion on Julia 1.10/1.11, which otherwise return Any here and
+# dispatch the callers' `wipe!` at run time.
 function ffldl(g00::Vector{CF}, g01::Vector{CF}, g11::Vector{CF}, σ::Fpr, fault::Base.RefValue{UInt64},
-               leaf::L=leafsigma) where {L}
+               leaf::L=leafsigma)::Node where {L}
     n = length(g00)
     l10 = [cdiv_real(cconj(g01[i]), g00[i]) for i in 1:n]
     d11 = [csub(g11[i], cmul(cmul(l10[i], cconj(l10[i])), g00[i])) for i in 1:n]
@@ -380,11 +382,12 @@ function setup(sk, σ::Float64, σmin::Float64; leaf::L=leafsigma) where {L}
     T = ffldl(g00, g01, g11, fpr(σ), fault, leaf)
     wipe!(g00, g01, g11)
     bad = leafbad(T, fpr(σmin), fpr(FS.MAX_SIGMA))
-    if (fault[] | bad) != 0
-        wipe!(T); wipe!(b00, b01, b10, b11)
-        fault[] == 0 || error("Falcon key expansion: the two evaluations of an ffLDL leaf differ; refusing to sign")
-        throw(ArgumentError("Falcon key has an ffLDL leaf outside [σmin, σmax]; refusing to sign"))
-    end
+    # The wipes sit in a branch that rejoins, not in the throwing one: Julia 1.10/1.11 compile calls
+    # in a block that ends in `throw` with dynamic dispatch.
+    refused = (fault[] | bad) != 0
+    refused && (wipe!(T); wipe!(b00, b01, b10, b11))
+    fault[] == 0 || error("Falcon key expansion: the two evaluations of an ffLDL leaf differ; refusing to sign")
+    refused && throw(ArgumentError("Falcon key has an ffLDL leaf outside [σmin, σmax]; refusing to sign"))
     Setup(b00, b01, b10, b11, T)
 end
 wipe!(gs::Setup) = (wipe!(gs.b00, gs.b01, gs.b10, gs.b11); wipe!(gs.T); gs)

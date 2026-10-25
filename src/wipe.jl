@@ -3,10 +3,31 @@ module Wipe
 
 export wipe!
 
-# Empty asm that reads the buffer: the zeroing cannot be removed as a dead store.
-barrier(p::Ptr{Cvoid}) = Base.llvmcall("""call void asm sideeffect "", "r,~{memory}"(ptr %0)
-ret void""", Cvoid, Tuple{Ptr{Cvoid}}, p)
+# Empty asm that reads the buffer: the zeroing cannot be removed as a dead store. Julia 1.12+
+# passes a Ptr to llvmcall as an LLVM `ptr`; earlier versions pass it as a machine-word integer.
+@static if VERSION >= v"1.12"
+    barrier(p::Ptr{Cvoid}) = Base.llvmcall("""call void asm sideeffect "", "r,~{memory}"(ptr %0)
+    ret void""", Cvoid, Tuple{Ptr{Cvoid}}, p)
+else
+    @eval barrier(p::Ptr{Cvoid}) = Base.llvmcall($("""call void asm sideeffect "", "r,~{memory}"(i$(Sys.WORD_SIZE) %0)
+    ret void"""), Cvoid, Tuple{Ptr{Cvoid}}, p)
+end
 
+# Contiguous mutable storage: Array, and Memory where it exists (Julia 1.11+).
+@static if isdefined(Base, :Memory)
+    const DenseStorage = Union{Array, Memory}
+else
+    const DenseStorage = Array
+end
+
+"""
+    wipe!(x...)
+
+Zero each array of plain data in place, behind a compiler barrier so the stores are not removed
+as dead. Accepts Arrays, Memory, BitArrays, views, reshapes, transposes and reinterprets of them,
+and vectors of arrays; read-only storage (e.g. the code units of a String) and non-plain element
+types throw `ArgumentError`. Returns `x` for one argument, `nothing` for several.
+"""
 function wipe!(x::Array{T}) where {T}
     isbitstype(T) || throw(ArgumentError("wipe! needs plain-data elements, got $T"))
     GC.@preserve x begin
@@ -22,9 +43,9 @@ wipe!(x::Vector{<:Array}) = (foreach(wipe!, x); x)
 # follow `parent` to the end. Only Array, Memory and BitArray storage is written to; anything
 # else (CodeUnits of an immutable String, ranges, unknown array types) is refused.
 storage(x::AbstractArray) = (p = parent(x); p === x ? x : storage(p))
-writable(::Union{Array, Memory, BitArray}) = true
+writable(::Union{DenseStorage, BitArray}) = true
 writable(_) = false
-base_pointer(s::Union{Array, Memory}) = Ptr{Cvoid}(pointer(s))
+base_pointer(s::DenseStorage) = Ptr{Cvoid}(pointer(s))
 base_pointer(s::BitArray) = Ptr{Cvoid}(pointer(s.chunks))
 
 # Contiguous memory is cleared with memset over its element stride (Base.elsize, which exceeds

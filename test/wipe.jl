@@ -20,7 +20,9 @@ end
     @test all(iszero, x[9:40]) && x[1:8] == 1:8 && x[41:64] == 41:64
     y = collect(Int32, 1:20); W.wipe!(view(y, 2:3:20))
     @test all(iszero, y[2:3:20]) && all(!iszero, y[setdiff(1:20, 2:3:20)])
-    m = Memory{UInt8}(undef, 16); fill!(m, 0xaa); W.wipe!(m); @test all(iszero, m)
+    if isdefined(Base, :Memory)
+        m = Base.Memory{UInt8}(undef, 16); fill!(m, 0xaa); W.wipe!(m); @test all(iszero, m)
+    end
     r = reshape(collect(Int64, 1:12), 3, 4); W.wipe!(r); @test all(iszero, r)
     k = rand(UInt8, 48); W.wipe!(view(k, 1:16), view(k, 33:48))
     @test all(iszero, k[1:16]) && all(iszero, k[33:48])
@@ -74,7 +76,9 @@ primitive type Wipe24 24 end
     @test Base.elsize(v) > sizeof(Wipe24)
     z(p) = Core.Intrinsics.zext_int(UInt32, p) == 0
     w = copy(v); W.wipe!(view(w, 1:8)); @test all(z, w)
-    m = Memory{Wipe24}(undef, 8); m .= v; W.wipe!(m); @test all(z, m)
+    if isdefined(Base, :Memory)
+        m = Base.Memory{Wipe24}(undef, 8); m .= v; W.wipe!(m); @test all(z, m)
+    end
     # BitArray, transpose, PermutedDimsArray, reinterpret: written through their parent storage.
     b = trues(70); W.wipe!(view(b, 1:2:70)); @test !any(b[1:2:70]) && all(b[2:2:70])
     t = rand(Int, 3, 4) .| 1; W.wipe!(transpose(t)); @test all(iszero, t)

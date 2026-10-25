@@ -1,23 +1,26 @@
 # ForgedPQ.jl
 
 [![CI](https://github.com/OnionBryan/ForgedPQ.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/OnionBryan/ForgedPQ.jl/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-stable-blue.svg)](https://onionbryan.github.io/ForgedPQ.jl/stable/)
+[![Aqua QA](https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg)](https://github.com/JuliaTesting/Aqua.jl)
 
 Post-quantum cryptography in pure Julia: the NIST lattice standards ML-KEM (FIPS 203) and
 ML-DSA (FIPS 204), and Falcon, the NTRU-lattice signature NIST is standardizing as FN-DSA (FIPS 206).
 
 Status: alpha (0.5.0). The API may change before 1.0. Formerly PQJulia.jl.
 
-| Standard | Algorithm | Parameter sets |
-|----------|-----------|----------------|
-| FIPS 203 | ML-KEM (Kyber) | 512 / 768 / 1024 |
-| FIPS 204 | ML-DSA (Dilithium) | 44 / 65 / 87 — pure, HashML-DSA, internal and external-μ interfaces |
-| FN-DSA (forthcoming FIPS 206) | Falcon (round-3 spec v1.2) | Falcon-512 / Falcon-1024 |
-| RFC 7748 | X25519 | Curve25519 Diffie–Hellman |
-| draft-connolly-cfrg-xwing-kem-11 | X-Wing | X25519 + ML-KEM-768 hybrid KEM |
+| Standard | Algorithm | Parameter sets | Status |
+|----------|-----------|----------------|--------|
+| FIPS 203 | ML-KEM (Kyber) | 512 / 768 / 1024 | final standard |
+| FIPS 204 | ML-DSA (Dilithium) | 44 / 65 / 87 — pure, HashML-DSA, internal and external-μ interfaces | final standard |
+| FN-DSA (forthcoming FIPS 206) | Falcon (round-3 spec v1.2) | Falcon-512 / Falcon-1024 | experimental: standard not published |
+| RFC 7748 | X25519 | Curve25519 Diffie–Hellman | final standard |
+| draft-connolly-cfrg-xwing-kem-11 | X-Wing | X25519 + ML-KEM-768 hybrid KEM | experimental: Internet-Draft |
 
 Also includes Shamir (k,n)-threshold secret sharing over GF(2^521 − 1).
 
-FIPS 206 and X-Wing are not final. NIST's publication listings show no FIPS 206 text, draft or
+FIPS 206 and X-Wing are not final, so their encodings may change before they are; use them where
+that is acceptable. NIST's publication listings show no FIPS 206 text, draft or
 final, as of 2026-10-09; ForgedPQ implements the round-3 Falcon specification, with options for the
 changes in NIST's 2025 status update ([SECURITY.md](SECURITY.md#fips-206)). X-Wing is an
 individual Internet-Draft, in the Independent Submission stream since revision -07 (2025-05-26);
@@ -56,6 +59,16 @@ Everything below runs in CI (`Pkg.test()`):
 - **CCTV** (C2SP): the ML-KEM strcmp, "unlucky" XOF and 2,595 invalid-modulus vectors, and the
   accumulated ML-DSA vectors (10,000 seeded keys per level in CI, byte-exact with the reference).
 - Property tests: round-trips, tamper rejection, malformed inputs.
+- **Malformed-input fuzzing** (`test/fuzz.jl`): random bytes at boundary and random lengths
+  through every public operation of every scheme; each must return normally (`false` from a
+  verifier) or throw `ArgumentError`, never another exception. 40 rounds per run, 1,000 in the
+  long tier.
+- **Constant-time machine code** (`test/constant_time.jl`): the 21 secret-data primitives
+  [SECURITY.md](SECURITY.md) lists as constant-time are disassembled as compiled on the machine
+  running the tests and must contain no conditional branch (Falcon's integer div and sqrt: one,
+  the test of their fixed-count loop) and no call. CI runs it on x86-64 and AArch64.
+- **Julia versions:** 1.10 (LTS), 1.12 and the current release, on Linux x86-64; the current
+  release on Linux AArch64, macOS (Apple silicon) and Windows.
 
 `test/interop/liboqs_interop.jl` (runs in CI against liboqs 0.16.0 built from source) checks
 two-way interoperability with liboqs for every scheme. Keys, signatures and ciphertexts produced by either side are
@@ -148,7 +161,7 @@ using Pkg
 Pkg.add(url="https://github.com/OnionBryan/ForgedPQ.jl")
 ```
 
-Requires Julia 1.12. The only runtime dependencies are the standard libraries `SHA`,
+Requires Julia 1.10 or later. The only runtime dependencies are the standard libraries `SHA`,
 `Random` and `LinearAlgebra`.
 
 ## Usage
@@ -158,23 +171,25 @@ using ForgedPQ
 msg = Vector{UInt8}("hello")
 
 # Key encapsulation (ML-KEM-768)
-pk, sk = MLKEM.Category3.kyber_kem_keypair()
-ct, shared_secret = MLKEM.Category3.kyber_kem_enc(pk)
-shared_secret == MLKEM.Category3.kyber_kem_dec(ct, sk)   # true
+pk, sk = MLKEM768.keygen()
+ct, shared_secret = MLKEM768.encaps(pk)
+shared_secret == MLKEM768.decaps(sk, ct)   # true
 
 # Signatures (ML-DSA-65); hedged by default, pass hedged=false for deterministic
-pk, sk = MLDSA.Category3.dilithium_keygen()
-sig = MLDSA.Category3.dilithium_sign(msg, sk; context=Vector{UInt8}("app-v1"))
-MLDSA.Category3.dilithium_verify(msg, sig, pk; context=Vector{UInt8}("app-v1"))   # true
+pk, sk = MLDSA65.keygen()
+sig = MLDSA65.sign(sk, msg; context=Vector{UInt8}("app-v1"))
+MLDSA65.verify(pk, msg, sig; context=Vector{UInt8}("app-v1"))   # true
 
 # Pre-hash signatures (HashML-DSA)
-sig = MLDSA.Category3.dilithium_sign_prehash(msg, sk, "SHA2-512")
-MLDSA.Category3.dilithium_verify_prehash(msg, sig, pk, "SHA2-512")   # true
+sig = MLDSA65.sign_prehash(sk, msg, "SHA2-512")
+MLDSA65.verify_prehash(pk, msg, sig, "SHA2-512")   # true
 
 # Signatures (Falcon-512)
-pk, sk = FNDSA.Falcon512.falcon_keygen()
-sig = FNDSA.Falcon512.falcon_sign(msg, sk)
-FNDSA.Falcon512.falcon_verify(msg, sig, pk)   # true
+pk, sk = Falcon512.keygen()
+sig = Falcon512.sign(sk, msg)
+Falcon512.verify(pk, msg, sig)   # true
+
+# Falcon extras on the per-level module
 ek = FNDSA.Falcon512.falcon_expand_sk(sk)     # decode once, then sign many messages fast
 sig = FNDSA.Falcon512.falcon_sign(msg, ek)
 FNDSA.Falcon512.falcon_wipe!(ek)              # zero the expanded key when done
@@ -192,24 +207,29 @@ sig = FNDSA.Falcon512.falcon_mrm_sign(M1, UInt8[], sk)        # 1251 bytes
 FalconMRM.decode(FNDSA.Falcon512.falcon_mrm_verify(UInt8[], sig, pk), length(bits)) == bits   # true
 
 # Hybrid key encapsulation (X-Wing: X25519 + ML-KEM-768)
-pk, sk = XWing.xwing_keypair()             # 1216-byte pk, 32-byte sk
-ct, ss = XWing.xwing_encaps(pk)            # 1120-byte ct, 32-byte shared secret
-ss == XWing.xwing_decaps(ct, sk)           # true
+pk, sk = XWing.keygen()                    # 1216-byte pk, 32-byte sk
+ct, ss = XWing.encaps(pk)                  # 1120-byte ct, 32-byte shared secret
+ss == XWing.decaps(sk, ct)                 # true
 
 # Secret sharing
 shares = shamir_share_bytes(rand(UInt8, 32), 3, 5)
 secret = shamir_reconstruct_bytes(shares[[1, 3, 5]], 3, 32)
 ```
 
-| Level | ML-KEM | ML-DSA | FN-DSA |
+| NIST level | ML-KEM | ML-DSA | Falcon |
 |-------|--------|--------|--------|
-| 1 | `MLKEM.Category1` (512) | `MLDSA.Category2` (44) | `FNDSA.Falcon512` |
-| 3 | `MLKEM.Category3` (768) | `MLDSA.Category3` (65) | |
-| 5 | `MLKEM.Category5` (1024) | `MLDSA.Category5` (87) | `FNDSA.Falcon1024` |
+| 1–2 | `MLKEM512` | `MLDSA44` | `Falcon512` |
+| 3 | `MLKEM768` | `MLDSA65` | |
+| 5 | `MLKEM1024` | `MLDSA87` | `Falcon1024` |
 
-Key and signature sizes are available as constants on each module, e.g.
-`MLDSA.Category3.SIG_BYTES` and `FNDSA.Falcon512.PK_BYTES`. Deterministic `_derand`
-variants take their randomness explicitly, for testing against known-answer vectors.
+Each module has `keygen`, `encaps`/`decaps` or `sign`/`verify`, with arguments in the order of
+the FIPS documents, and size constants such as `MLDSA65.SIGNATURE_BYTES`. Results destructure
+positionally (`pk, sk = keygen()`) or by name (`kp.public_key`). Passing a seed or the
+randomness explicitly (`keygen(seed)`, `encaps(pk, m)`, `sign(sk, msg, rnd)`) makes an operation
+deterministic, for testing against known-answer vectors. The per-level modules they wrap
+(`MLKEM.Category3`, `MLDSA.Category3`, `FNDSA.Falcon512`, ...) remain available, with the full
+interface: ML-DSA internal and external-μ signing, Falcon expanded keys, certificates and
+message recovery.
 
 ## Security
 
@@ -240,4 +260,5 @@ exposure of X25519 and fixed issues.
 
 ## License
 
-MIT
+MIT ([LICENSE](LICENSE)). The algorithms are standardized by NIST and in the public domain;
+this implementation is independent and has not been endorsed or certified by NIST.

@@ -315,6 +315,12 @@ function polyt0_unpack!(r::Vector{Int32}, a::AbstractVector{UInt8})
 end
 # ==================== KEY GENERATION ====================
 
+"""
+    dilithium_keygen_derand(xi) -> (pk, sk)
+
+ML-DSA.KeyGen_internal (FIPS 204 Alg. 6) from the 32-byte seed ξ. Deterministic; for testing
+and key derivation.
+"""
 function dilithium_keygen_derand(xi::Vector{UInt8})
     length(xi) == SEEDBYTES || throw(ArgumentError("keygen seed must be $SEEDBYTES bytes"))
     # Every secret buffer exists before the `try`; the `finally` wipes them on every exit, and an
@@ -392,6 +398,11 @@ function dilithium_keygen_derand(xi::Vector{UInt8})
     end
 end
 
+"""
+    dilithium_keygen() -> (pk, sk)
+
+ML-DSA.KeyGen (FIPS 204 Alg. 1): ξ from the OS CSPRNG (`Random.RandomDevice`).
+"""
 function dilithium_keygen()
     xi = rand(RandomDevice(), UInt8, SEEDBYTES)
     try
@@ -803,9 +814,9 @@ function prehash_message(msg::Vector{UInt8}, hash_alg::String)::Vector{UInt8}
     elseif hash_alg == "SHA3-224"
         return Keccak.sha3_224(msg)
     elseif hash_alg == "SHA2-512/224"
-        return SHA.sha2_512_224(msg)
+        return sha512_224(msg)
     elseif hash_alg == "SHA2-512/256"
-        return SHA.sha2_512_256(msg)
+        return sha512_256(msg)
     else
         throw(ArgumentError("Unsupported hash algorithm: $hash_alg"))
     end

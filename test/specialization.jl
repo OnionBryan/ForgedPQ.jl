@@ -132,6 +132,6 @@ end # module SpecializationCheck
     # catbytes allocates only its result, as vcat does.
     a = rand(UInt8, 32); b = rand(UInt8, 64); c = rand(UInt8, 16)
     cat3(a, b, c) = ForgedPQ.Bytes.catbytes(a, b, c)
-    cat3(a, b, c)
+    cat3(a, b, c); vcat(a, b, c)                               # compile both before measuring
     @test @allocated(cat3(a, b, c)) == @allocated(vcat(a, b, c))
 end

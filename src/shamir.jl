@@ -27,6 +27,13 @@ isprobableprime(p::Integer) = p >= 2 &&
 check_modulus(p::Integer) = p == PRIME_P || isprobableprime(p) ||
     throw(ArgumentError("modulus p must be prime, got $p"))
 
+"""
+    shamir_share(secret, k, n, p = 2^521 - 1) -> Vector{Tuple{Int, BigInt}}
+
+Split `secret` (an integer in [0, p)) into `n` shares (x, f(x)) at x = 1..n, any `k` of which
+recover it. f has degree k − 1, its coefficients drawn from the OS CSPRNG; `p` must be a prime
+greater than `n`. Fewer than `k` shares give no information about the secret.
+"""
 function shamir_share(secret::Integer, k::Int, n::Int, p::Integer=PRIME_P)
     k < 1 && throw(ArgumentError("Threshold k must be >= 1, got $k"))
     n < 1 && throw(ArgumentError("Number of shares n must be >= 1, got $n"))
@@ -61,6 +68,12 @@ function shamir_share(secret::Integer, k::Int, n::Int, p::Integer=PRIME_P)
     return shares
 end
 
+"""
+    shamir_reconstruct(shares, k, p = 2^521 - 1) -> BigInt
+
+Lagrange interpolation at x = 0 from the first `k` of `shares`. Duplicate x-coordinates (mod p)
+throw `ArgumentError`. Shares carry no integrity: a modified share gives a wrong secret, not an error.
+"""
 function shamir_reconstruct(shares::Vector{Tuple{Int, T}}, k::Int, p::Integer=PRIME_P) where T <: Integer
     k < 1 && throw(ArgumentError("Threshold k must be >= 1, got $k"))
     length(shares) < k && throw(ArgumentError("Need >= $k shares, got $(length(shares))"))

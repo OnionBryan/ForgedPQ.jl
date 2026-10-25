@@ -7,7 +7,7 @@ const FAL = ForgedPQ.FNDSA.Falcon
 const FS = ForgedPQ.FNDSA.FalconSampler
 
 # One SHAKE256 stream is shared across all vectors, as in the reference.
-include("shake_reader.jl")
+isdefined(Main, :ShakeReader) || include("shake_reader.jl")
 
 @testset "Falcon KATs (round-3 C reference)" begin
     kat_dir = joinpath(@__DIR__, "kat")
@@ -24,7 +24,7 @@ include("shake_reader.jl")
     kat = JSON.parsefile(joinpath(kat_dir, "falcon_sign_kat.json"))
     msg = Vector{UInt8}(kat["message"]); vecs = kat["tests"]
     seed = Vector{UInt8}(kat["shake_seed"])
-    @test take!(ShakeReader(seed), 1000) == SHA.shake256(seed, UInt64(1000))
+    isdefined(SHA, :shake256) && @test take!(ShakeReader(seed), 1000) == SHA.shake256(seed, UInt64(1000))
     stream = ShakeReader(seed)
 
     for n in sort(unique(t["n"] for t in vecs))

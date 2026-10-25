@@ -17,23 +17,24 @@ byte-exact with the round-3 C reference implementation.
 ```julia
 using ForgedPQ
 
-# ML-KEM-768 Key Encapsulation
-pk, sk = MLKEM.Category3.kyber_kem_keypair()
-ct, ss_enc = MLKEM.Category3.kyber_kem_enc(pk)
-ss_dec = MLKEM.Category3.kyber_kem_dec(ct, sk)
-@assert ss_enc == ss_dec
+# ML-KEM-768 key encapsulation
+pk, sk = MLKEM768.keygen()
+ct, ss = MLKEM768.encaps(pk)
+@assert MLKEM768.decaps(sk, ct) == ss
 
-# ML-DSA-65 Digital Signatures
-pk, sk = MLDSA.Category3.dilithium_keygen()
+# ML-DSA-65 signatures
+pk, sk = MLDSA65.keygen()
 msg = Vector{UInt8}("hello")
-sig = MLDSA.Category3.dilithium_sign(msg, sk)
-MLDSA.Category3.dilithium_verify(msg, sig, pk)  # true
+sig = MLDSA65.sign(sk, msg)
+MLDSA65.verify(pk, msg, sig)  # true
 
-# Falcon-512 Signatures
-pk, sk = FNDSA.Falcon512.falcon_keygen()
-sig = FNDSA.Falcon512.falcon_sign(msg, sk)
-FNDSA.Falcon512.falcon_verify(msg, sig, pk)  # true
+# Falcon-512 signatures
+pk, sk = Falcon512.keygen()
+sig = Falcon512.sign(sk, msg)
+Falcon512.verify(pk, msg, sig)  # true
 ```
+
+The per-level modules (`MLKEM.Category3.kyber_kem_keypair`, ...) remain available.
 """
 module ForgedPQ
 
@@ -68,8 +69,14 @@ using .XWing
 # Re-export modules
 export MLKEM, MLDSA, FNDSA, X25519, XWing
 
+# One module per parameter set under its standard name (src/api.jl)
+include("api.jl")
+export MLKEM512, MLKEM768, MLKEM1024, MLDSA44, MLDSA65, MLDSA87, Falcon512, Falcon1024
+
 # Shamir Secret Sharing
 include("shamir.jl")
 export shamir_share, shamir_reconstruct, shamir_share_bytes, shamir_reconstruct_bytes
+
+include("precompile.jl")
 
 end # module ForgedPQ

@@ -8,11 +8,38 @@ on:
 
 jobs:
   test:
+    name: test (${{ matrix.os }}, Julia ${{ matrix.julia }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+        include:
+          - { os: ubuntu-latest, julia: 'lts', long: '1', dispatch: true }
+          - { os: ubuntu-latest, julia: '1.12', long: '1', dispatch: true }
+          - { os: ubuntu-latest, julia: '1', long: '', dispatch: false }
+          - { os: ubuntu-24.04-arm, julia: '1', long: '', dispatch: false }
+          - { os: macos-latest, julia: '1', long: '', dispatch: false }
+          - { os: windows-latest, julia: '1', long: '', dispatch: false }
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: ${{ matrix.julia }}
+
+      - uses: julia-actions/cache@v3
+
+      - name: Run tests
+        env:
+          FORGEDPQ_LONG_TESTS: ${{ matrix.long }}
+        run: julia --project=. -e 'using Pkg; Pkg.test()'
+
+      - name: Runtime-dispatch check
+        if: ${{ matrix.dispatch }}
+        run: julia test/timing/dispatch.jl
+
+  coverage:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
@@ -22,13 +49,20 @@ jobs:
 
       - uses: julia-actions/cache@v3
 
-      - name: Run tests
-        env:
-          FORGEDPQ_LONG_TESTS: ${{ matrix.os == 'ubuntu-latest' && '1' || '' }}
-        run: julia --project=. -e 'using Pkg; Pkg.test()'
+      - name: Tests with coverage
+        run: julia --project=. -e 'using Pkg; Pkg.test(coverage=true)'
 
-      - name: Runtime-dispatch check
-        run: julia test/timing/dispatch.jl
+      - name: Coverage summary
+        run: |
+          julia -e '
+            using Pkg; Pkg.activate(temp=true); Pkg.add("Coverage"; io=devnull)
+            using Coverage
+            c = process_folder("src"); covered, total = get_summary(c)
+            pct = round(100 * covered / total, digits=1)
+            open(ENV["GITHUB_STEP_SUMMARY"], "a") do io
+                println(io, "### Line coverage: $pct% ($covered of $total lines in src/)")
+            end
+            println("Line coverage: $pct% ($covered of $total lines)")'
 
   interop:
     runs-on: ubuntu-latest

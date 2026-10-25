@@ -9,6 +9,7 @@ using ForgedPQ
 using Test
 using Random
 using SHA
+isdefined(Main, :oracle_shake256) || include("shake_reader.jl")
 
 Random.seed!(42)
 const NTRIALS = 100
@@ -277,7 +278,7 @@ println("=" ^ 70)
                 # Verify the actual FIPS 203 formula: ss = SHAKE256(z || ct)
                 # z is the last 32 bytes of the KEM secret key
                 z = sk[end-31:end]
-                expected = SHA.shake256(vcat(z, ct_bad), UInt64(32))
+                expected = oracle_shake256(vcat(z, ct_bad), 32)
                 @test ss1 == expected         # must equal rkprf(z, ct_bad)
             end
         end

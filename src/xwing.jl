@@ -126,4 +126,31 @@ function xwing_decaps(ct::AbstractVector{UInt8}, sk::AbstractVector{UInt8})
     end
 end
 
+"""
+    keygen() -> (; public_key, secret_key)
+    keygen(seed) -> (; public_key, secret_key)
+
+X-Wing key generation (§5.2); a 32-byte `seed` makes it deterministic (§5.2.1).
+"""
+keygen() = ((pk, sk) = xwing_keypair(); (; public_key = pk, secret_key = sk))
+keygen(seed::AbstractVector{UInt8}) = ((pk, sk) = xwing_keypair_derand(seed); (; public_key = pk, secret_key = sk))
+
+"""
+    encaps(public_key) -> (; ciphertext, shared_secret)
+    encaps(public_key, eseed) -> (; ciphertext, shared_secret)
+
+X-Wing encapsulation (§5.4); a 64-byte `eseed` makes it deterministic (§5.4.1).
+"""
+encaps(public_key::AbstractVector{UInt8}) =
+    ((ct, ss) = xwing_encaps(public_key); (; ciphertext = ct, shared_secret = ss))
+encaps(public_key::AbstractVector{UInt8}, eseed::AbstractVector{UInt8}) =
+    ((ct, ss) = xwing_encaps_derand(public_key, eseed); (; ciphertext = ct, shared_secret = ss))
+
+"""
+    decaps(secret_key, ciphertext) -> shared_secret
+
+X-Wing decapsulation (§5.5).
+"""
+decaps(secret_key::AbstractVector{UInt8}, ciphertext::AbstractVector{UInt8}) = xwing_decaps(ciphertext, secret_key)
+
 end # module

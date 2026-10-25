@@ -1,7 +1,9 @@
 Manifest.toml
 *.bin
 .DS_Store
-docs/
+docs/build/
+docs/src/security.md
+docs/src/changelog.md
 benchmarks/Manifest.toml
 test/interop/liboqs_shim.*
 research/

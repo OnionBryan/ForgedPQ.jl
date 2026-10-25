@@ -156,7 +156,9 @@ println("DONE")
 
 @testset "ML-KEM / X-Wing regressions (sweep)" begin
     zb(v) = ZeroBasedBytes(collect(UInt8, v))
-    mem(v) = (m = Memory{UInt8}(undef, length(v)); copyto!(m, v); m)
+    # Memory where it exists (Julia 1.11+); otherwise another non-Vector array type.
+    mem(v) = isdefined(Base, :Memory) ? (m = Base.Memory{UInt8}(undef, length(v)); copyto!(m, v); m) :
+                                        view(collect(UInt8, v), :)
     LEVELS = (MLKEM.Category1, MLKEM.Category3, MLKEM.Category5)
 
     @testset "F7: no Base.vcat on byte data (runtime-dispatch gate)" begin

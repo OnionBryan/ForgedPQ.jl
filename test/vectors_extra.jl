@@ -90,14 +90,14 @@ const ACC_MLDSA_100 = Dict(44 => "d51148e1f9f4fa1a723a6cf42e25f2a99eb5c1b378b3d2
                           87 => "8c3ad714777622b8f21ce31bb35f71394f23bc0fcf3c78ace5d608990f3b061b")
 # 100 keys by default; FORGEDPQ_LONG_TESTS=1 runs the 10 000-key CI tier.
 @testset "CCTV accumulated ML-DSA-$lv ($ACC_N keys)" for (lv, C) in [(44, MLDSA.Category2), (65, MLDSA.Category3), (87, MLDSA.Category5)]
-    s = ShakeReader(UInt8[]; bits=128); a = SHA.SHAKE_128_CTX(); ok = true
+    s = ShakeReader(UInt8[]; bits=128); acc = UInt8[]; ok = true
     for _ in 1:ACC_N
         pk, sk = C.dilithium_keygen_derand(take!(s, 32))
         sig = C.dilithium_sign_derand(UInt8[], sk, zeros(UInt8, 32))
-        SHA.update!(a, pk); SHA.update!(a, sig)
+        append!(acc, pk, sig)
         ok &= C.dilithium_verify(UInt8[], sig, pk)
     end
-    d = Vector{UInt8}(undef, 32); SHA.digest!(a, UInt64(32), pointer(d))
+    d = oracle_shake128(acc, 32)
     @test ok
     @test bytes2hex(d) == (ACC_N == 100 ? ACC_MLDSA_100 : ACC_MLDSA_10K)[lv]
 end

@@ -3,13 +3,14 @@
 # expansion to detect a fault (Kaihara et al., ePrint 2026/2046). Signatures are unchanged.
 using Test, JSON, SHA, InteractiveUtils
 using ForgedPQ
+isdefined(Main, :oracle_shake256) || include("shake_reader.jl")
 
 @testset "Falcon signer hardening" begin
     FP = ForgedPQ.FNDSA.FalconFpr; FAL = ForgedPQ.FNDSA.Falcon; MRM = ForgedPQ.FNDSA.FalconMRM
     σmax = ForgedPQ.FNDSA.FalconSampler.MAX_SIGMA
     leaflist(T, out=FP.Leaf[]) = T isa FP.Leaf ? push!(out, T) : (leaflist(T.t0, out); leaflist(T.t1, out))
     # Fixed randomness: one SHAKE256 output read in order.
-    stream(tag) = (buf = SHA.shake256(Vector{UInt8}(tag), UInt64(8192)); pos = Ref(0);
+    stream(tag) = (buf = oracle_shake256(Vector{UInt8}(tag), 8192); pos = Ref(0);
                    k -> (v = buf[pos[]+1:pos[]+k]; pos[] += k; v))
     kat = JSON.parsefile(joinpath(@__DIR__, "kat", "falcon_sign_kat.json"))["tests"]
     katkey(n) = (t = first(x for x in kat if x["n"] == n); FAL.secret_key(t["f"], t["g"], t["F"], t["G"]))

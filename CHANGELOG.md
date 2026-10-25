@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- One module per parameter set under its standard name — `MLKEM512`, `MLKEM768`, `MLKEM1024`,
+  `MLDSA44`, `MLDSA65`, `MLDSA87`, `Falcon512`, `Falcon1024` — with `keygen`, `encaps`/`decaps`,
+  `sign`/`verify`, `sign_prehash`/`verify_prehash`, key checks and size constants, arguments in
+  the order of the FIPS documents and results as named tuples. `XWing` gains `keygen`, `encaps`
+  and `decaps`. The per-level modules are unchanged.
+- Documentation site (Documenter), deployed from CI, and a docstring for every public name.
+- Julia 1.10 (LTS) and 1.11 support; CI tests 1.10, 1.12 and the current release.
+- Precompiled public operations: a first call no longer compiles (ML-KEM-768 keygen 1.04 s → 0.3 ms
+  on first use).
+- `test/fuzz.jl`: malformed input through every public operation must give a normal result or an
+  `ArgumentError`. `test/constant_time.jl`: the machine code of the constant-time primitives,
+  checked for conditional branches and calls on x86-64 and AArch64.
+- Line coverage reported in the CI summary.
+
+### Fixed
+
+- HashML-DSA with SHA2-512/224 or SHA2-512/256 threw `UndefVarError` on Julia 1.10 and 1.11, whose
+  SHA stdlib lacks them; they are now computed from SHA-512 with the FIPS 180-4 initial values.
+
+### Changed
+
+- LICENSE is the plain MIT text; the NIST note moved to the README. Falcon and X-Wing are marked
+  experimental, their specifications not being final.
+
 ## 0.5.0 (alpha)
 
 ### Changed
