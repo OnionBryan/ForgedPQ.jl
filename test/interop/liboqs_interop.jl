@@ -1,5 +1,5 @@
 # test/interop/liboqs_interop.jl — two-way interop with liboqs (independent C implementations of
-# ML-KEM, ML-DSA and Falcon): keys, signatures and ciphertexts cross in both directions. Runs in CI
+# ML-KEM, ML-DSA, SLH-DSA and Falcon): keys, signatures and ciphertexts cross in both directions. Runs in CI
 # (.github/workflows/ci.yml builds the Linux shim). On macOS:
 #   clang -O2 -dynamiclib -o test/interop/liboqs_shim.dylib test/interop/oqs_shim.c \
 #     -I$(brew --prefix)/include -Wl,-force_load,$(brew --prefix)/lib/liboqs.a -L$(brew --prefix openssl@3)/lib -lcrypto
@@ -84,6 +84,13 @@ end
 for (name, C) in [("ML-DSA-44", MLDSA.Category2), ("ML-DSA-65", MLDSA.Category3), ("ML-DSA-87", MLDSA.Category5)], ctx in (UInt8[], Vector{UInt8}("interop-ctx"))
     global allok &= sig_interop(name, C.dilithium_keygen, (m, sk, x) -> C.dilithium_sign(m, sk; context=x),
                                 (m, s, pk, x) -> C.dilithium_verify(m, s, pk; context=x), 25; ctx)
+end
+# SLH-DSA, pure mode: the small (s) sets sign for about a second, so they run one round each.
+for (sym, _) in SLHDSA.PARAMS, ctx in (UInt8[], Vector{UInt8}("interop-ctx"))
+    M = getfield(SLHDSA, sym)
+    name = "SLH_DSA_PURE_" * uppercase(String(sym))
+    global allok &= sig_interop(name, () -> Tuple(M.keygen()), (m, sk, x) -> M.sign(sk, m; context=x),
+                                (m, s, pk, x) -> M.verify(pk, m, s; context=x), endswith(String(sym), "f") ? 3 : 1; ctx)
 end
 for (name, M) in [("ML-KEM-512", MLKEM.Category1), ("ML-KEM-768", MLKEM.Category3), ("ML-KEM-1024", MLKEM.Category5)]
     global allok &= kem_interop(name, M, 50)

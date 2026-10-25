@@ -23,6 +23,10 @@ for (lv, F) in ((512, FNDSA.Falcon512), (1024, FNDSA.Falcon1024))
                  ("Falcon-$lv sign", F.falcon_sign, (V, EK)),
                  ("Falcon-$lv MRM sign", F.falcon_mrm_sign, (Vector{Int}, V, EK)))
 end
+for M in (SLHDSA_SHA2_128f, SLHDSA_SHA2_256f, SLHDSA_SHAKE_128f)
+    push!(paths, ("$(M.NAME) keygen", M.keygen, (V,)),
+                 ("$(M.NAME) sign", M.sign, (V, V, V)))
+end
 push!(paths, ("X25519", X25519.x25519, (V, V)),
              ("X-Wing decaps", XWing.xwing_decaps, (V, V)),
              ("X-Wing encaps", XWing.xwing_encaps, (V,)))
@@ -31,7 +35,7 @@ bad = 0
 for (name, f, T) in paths
     n = length(JET.get_reports(report_opt(f, T)))
     global bad += n
-    println(rpad(name, 22), n, " runtime-dispatch reports")
+    println(rpad(name, 30), n, " runtime-dispatch reports")
 end
 println(bad == 0 ? "\nNO RUNTIME DISPATCH" : "\nRUNTIME DISPATCH FOUND")
 exit(bad == 0 ? 0 : 1)

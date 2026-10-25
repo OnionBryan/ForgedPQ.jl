@@ -2,20 +2,20 @@
 
 ## Scope
 
-A pure-Julia implementation of NIST FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), Falcon (round-3
-specification v1.2, the basis of FN-DSA, to be standardized as FIPS 206), X25519 (RFC 7748) and
-X-Wing (an Internet-Draft). ML-KEM and ML-DSA pass 855 NIST ACVP vectors covering every
-interface. Falcon signing is byte-exact with the round-3 C implementation on 120 reference
-vectors.
+A pure-Julia implementation of NIST FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), FIPS 205 (SLH-DSA),
+Falcon (round-3 specification v1.2, the basis of FN-DSA, to be standardized as FIPS 206), X25519
+(RFC 7748) and X-Wing (an Internet-Draft). ML-KEM, ML-DSA and SLH-DSA pass 2,103 NIST ACVP vectors
+covering every interface. Falcon signing is byte-exact with the round-3 C implementation on 120
+reference vectors.
 
 ## Randomness
 
 All secret randomness comes from the operating system CSPRNG (`Random.RandomDevice`):
-ML-KEM keygen and encapsulation, ML-DSA keygen and hedged `rnd`, Falcon keygen, salts and
-per-signature sampler seeds (expanded with ChaCha20, as in the reference), X25519 and X-Wing
-keys, and Shamir coefficients. Julia's default task-local RNG (Xoshiro) is never used for key
-material. ML-DSA signing is hedged by default, as FIPS 204 recommends; `hedged=false` selects
-the deterministic variant.
+ML-KEM keygen and encapsulation, ML-DSA keygen and hedged `rnd`, SLH-DSA keygen seeds and hedged
+`addrnd`, Falcon keygen, salts and per-signature sampler seeds (expanded with ChaCha20, as in the
+reference), X25519 and X-Wing keys, and Shamir coefficients. Julia's default task-local RNG
+(Xoshiro) is never used for key material. ML-DSA and SLH-DSA signing are hedged by default, as
+FIPS 204 and FIPS 205 recommend; `hedged=false` selects the deterministic variant.
 
 ## Timing
 
@@ -37,6 +37,7 @@ constant-time after compilation.
 | `make_hint` (ML-DSA) | Bitwise `\|`/`&` comparisons; compiles to `setcc`/`csel`, no branches, on x86-64 and AArch64 | dilithium_level.jl |
 | X25519 | Scalar bits from 64-bit words, mask swaps on 51-bit limbs, branch-free canonical encoding | x25519.jl |
 | Falcon signing (key expansion, FFT, ffLDL, ffSampling, SamplerZ) | Integer emulation of binary64 (Pornin's `fpr`): branch-free add, mul, div, sqrt and rounding; no hardware floating point; unmasked | falcon/falcon_fpr.jl |
+| SLH-DSA | SK.seed and SK.prf enter only hash functions of fixed input length (SHA-256, SHA-512 and HMAC in `sha2.jl`, SHAKE256 in `keccak.jl`, all branch-free); control flow follows idx_tree, idx_leaf and the WOTS+ and FORS digits, all derived from R and the message and readable from the signature | slhdsa.jl, sha2.jl |
 
 ### Checked in the compiled code
 
@@ -121,6 +122,7 @@ allocates and, for Falcon on Linux, by scanning the process memory for key mater
 |--------|-------|
 | ML-KEM | keygen seed expansion, σ, s and e, Â∘ŝ, PRF and noise buffers; encapsulation (K, r), r, e1, e2, Âᵀ∘r̂ and t̂ᵀ∘r̂; decapsulation ŝ, ŝᵀ∘û, m′, (K′, r′), the re-encryption of m′ and the rejection-key input; the basemul scratch on every path. Decapsulation reads dk_PKE and z in place, without a copy |
 | ML-DSA | keygen ξ, seed expansion, ρ′, K, s1, s2, t and t0; when signing, the decoded K, s1, s2 and t0, ρ″, y, z, w0, w1 and the hints, and for every attempt, rejected or accepted, the challenge input μ ‖ w1Encode(w1), c̃, c, NTT(c) and the SampleInBall stream; the hedged `rnd` |
+| SLH-DSA | the copies of SK.seed and SK.prf, every hash input buffer and SHAKE output, the WOTS+ chain buffer, the SHA-2 message schedule and padding scratch, the FORS secret values that do not go into the signature, the PRF_msg input and the HMAC key blocks; the hedged `addrnd`. Tree nodes are hash images of secrets and stay in memory, as in the reference |
 | X-Wing | the expanded ML-KEM key and X25519 scalar, the encapsulation seed and both partial shared secrets; the ML-KEM key check runs before anything is derived from the seed |
 | X25519 | holds its scalar and field elements in immutable tuples, which leave no heap copy |
 | SHAKE, SHA3 | the Keccak state is an immutable tuple (keccak.jl), which leaves no heap copy |

@@ -24,6 +24,22 @@ MLDSA65.sign_prehash
 MLDSA65.verify_prehash
 ```
 
+## SLH-DSA (FIPS 205)
+
+The twelve parameter sets — `SLHDSA_SHA2_128s`, `SLHDSA_SHA2_128f`, `SLHDSA_SHA2_192s`,
+`SLHDSA_SHA2_192f`, `SLHDSA_SHA2_256s`, `SLHDSA_SHA2_256f` and the same six with `SHAKE` — have the
+same functions; `SLHDSA_SHA2_128s` is shown.
+
+```@docs
+SLHDSA_SHA2_128s.keygen
+SLHDSA_SHA2_128s.sign
+SLHDSA_SHA2_128s.verify
+SLHDSA_SHA2_128s.sign_prehash
+SLHDSA_SHA2_128s.verify_prehash
+SLHDSA_SHA2_128s.sign_internal
+SLHDSA_SHA2_128s.verify_internal
+```
+
 ## Falcon
 
 `Falcon512` and `Falcon1024` have the same functions; `Falcon512` is shown.
@@ -82,6 +98,7 @@ interfaces. Levels other than the one shown have the same functions.
 ```@docs
 MLKEM
 MLDSA
+SLHDSA
 FNDSA
 X25519
 XWing

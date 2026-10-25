@@ -48,6 +48,10 @@ include("bytes.jl")
 # Keccak-f[1600]: SHAKE128/256 and SHA3-256/512 for every scheme
 include("keccak.jl")
 
+# SHA-256/512 compression with midstates (SLH-DSA) and the pre-hash table (HashML-DSA, HashSLH-DSA)
+include("sha2.jl")
+include("prehash.jl")
+
 # ML-KEM (FIPS 203) — Kyber Key Encapsulation
 include("mlkem.jl")
 using .MLKEM
@@ -60,6 +64,15 @@ using .MLDSA
 include("fndsa.jl")
 using .FNDSA
 
+# SLH-DSA (FIPS 205) — stateless hash-based signatures
+include("slhdsa.jl")
+using .SLHDSA
+for (name, _) in SLHDSA.PARAMS
+    alias = Symbol("SLHDSA_", name)
+    @eval const $alias = SLHDSA.$name
+    @eval export $alias
+end
+
 # X25519 (RFC 7748) and the X-Wing hybrid KEM (X25519 + ML-KEM-768)
 include("x25519.jl")
 using .X25519
@@ -67,7 +80,7 @@ include("xwing.jl")
 using .XWing
 
 # Re-export modules
-export MLKEM, MLDSA, FNDSA, X25519, XWing
+export MLKEM, MLDSA, FNDSA, SLHDSA, X25519, XWing
 
 # One module per parameter set under its standard name (src/api.jl)
 include("api.jl")

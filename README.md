@@ -4,8 +4,9 @@
 [![Docs](https://img.shields.io/badge/docs-dev-blue.svg)](https://onionbryan.github.io/ForgedPQ.jl/dev/)
 [![Aqua QA](https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg)](https://github.com/JuliaTesting/Aqua.jl)
 
-Post-quantum cryptography in pure Julia: the NIST lattice standards ML-KEM (FIPS 203) and
-ML-DSA (FIPS 204), and Falcon, the NTRU-lattice signature NIST is standardizing as FN-DSA (FIPS 206).
+Post-quantum cryptography in pure Julia: the three NIST post-quantum standards — ML-KEM
+(FIPS 203), ML-DSA (FIPS 204) and SLH-DSA (FIPS 205) — and Falcon, the NTRU-lattice signature
+NIST is standardizing as FN-DSA (FIPS 206).
 
 Status: alpha (0.5.0). The API may change before 1.0. Formerly PQJulia.jl.
 
@@ -13,6 +14,7 @@ Status: alpha (0.5.0). The API may change before 1.0. Formerly PQJulia.jl.
 |----------|-----------|----------------|--------|
 | FIPS 203 | ML-KEM (Kyber) | 512 / 768 / 1024 | final standard |
 | FIPS 204 | ML-DSA (Dilithium) | 44 / 65 / 87 — pure, HashML-DSA, internal and external-μ interfaces | final standard |
+| FIPS 205 | SLH-DSA (SPHINCS+) | SHA2 and SHAKE × 128 / 192 / 256 × s / f — pure, HashSLH-DSA, internal interface | final standard |
 | FN-DSA (forthcoming FIPS 206) | Falcon (round-3 spec v1.2) | Falcon-512 / Falcon-1024 | experimental: standard not published |
 | RFC 7748 | X25519 | Curve25519 Diffie–Hellman | final standard |
 | draft-connolly-cfrg-xwing-kem-11 | X-Wing | X25519 + ML-KEM-768 hybrid KEM | experimental: Internet-Draft |
@@ -34,6 +36,13 @@ Everything below runs in CI (`Pkg.test()`):
   and decapsulation-key input checks, at all three levels.
 - **ML-DSA:** 615 NIST ACVP vectors: KeyGen; SigGen deterministic and hedged, pure and
   pre-hash, internal and external-μ; SigVer for every interface, at all three levels.
+- **SLH-DSA:** all 1,248 NIST ACVP vectors for the twelve parameter sets: 120 KeyGen, 624 SigGen
+  (deterministic and hedged; pure, pre-hash with every approved hash, and internal) and 504 SigVer
+  (valid, and modified R, FORS and hypertree parts, modified message, too short and too long). The
+  vendored copies store each expected signature as its SHA-256 and rebuild each SigVer signature
+  from its key and randomness plus a recorded edit, checked against the original's SHA-256; the
+  small (`s`) sets run every vector in the long tier and one per group otherwise. The SHA-2
+  engine behind the SHA2 sets (`src/sha2.jl`) matches SHA.jl.
 - **Falcon:** byte-exact against the round-3 C implementation. From the same key and
   randomness stream, all 120 reference signatures (n = 2 … 1024) are reproduced bit for bit,
   and SamplerZ matches all 3,072 reference vectors. The vectors come from
@@ -206,6 +215,11 @@ M1 = FalconMRM.encode(bits, FNDSA.Falcon512.MRM_M1_LEN)
 sig = FNDSA.Falcon512.falcon_mrm_sign(M1, UInt8[], sk)        # 1251 bytes
 FalconMRM.decode(FNDSA.Falcon512.falcon_mrm_verify(UInt8[], sig, pk), length(bits)) == bits   # true
 
+# Hash-based signatures (SLH-DSA): security rests on the hash function alone
+pk, sk = SLHDSA_SHA2_128s.keygen()         # 32-byte pk, 64-byte sk
+sig = SLHDSA_SHA2_128s.sign(sk, msg)       # 7856 bytes; the f sets sign ~20× faster, larger
+SLHDSA_SHA2_128s.verify(pk, msg, sig)      # true
+
 # Hybrid key encapsulation (X-Wing: X25519 + ML-KEM-768)
 pk, sk = XWing.keygen()                    # 1216-byte pk, 32-byte sk
 ct, ss = XWing.encaps(pk)                  # 1120-byte ct, 32-byte shared secret
@@ -216,11 +230,11 @@ shares = shamir_share_bytes(rand(UInt8, 32), 3, 5)
 secret = shamir_reconstruct_bytes(shares[[1, 3, 5]], 3, 32)
 ```
 
-| NIST level | ML-KEM | ML-DSA | Falcon |
-|-------|--------|--------|--------|
-| 1–2 | `MLKEM512` | `MLDSA44` | `Falcon512` |
-| 3 | `MLKEM768` | `MLDSA65` | |
-| 5 | `MLKEM1024` | `MLDSA87` | `Falcon1024` |
+| NIST level | ML-KEM | ML-DSA | SLH-DSA (SHA2 or SHAKE, small or fast) | Falcon |
+|-------|--------|--------|--------|--------|
+| 1–2 | `MLKEM512` | `MLDSA44` | `SLHDSA_SHA2_128s`, `SLHDSA_SHAKE_128f`, ... | `Falcon512` |
+| 3 | `MLKEM768` | `MLDSA65` | `SLHDSA_SHA2_192s`, `SLHDSA_SHAKE_192f`, ... | |
+| 5 | `MLKEM1024` | `MLDSA87` | `SLHDSA_SHA2_256s`, `SLHDSA_SHAKE_256f`, ... | `Falcon1024` |
 
 Each module has `keygen`, `encaps`/`decaps` or `sign`/`verify`, with arguments in the order of
 the FIPS documents, and size constants such as `MLDSA65.SIGNATURE_BYTES`. Results destructure
@@ -229,7 +243,11 @@ randomness explicitly (`keygen(seed)`, `encaps(pk, m)`, `sign(sk, msg, rnd)`) ma
 deterministic, for testing against known-answer vectors. The per-level modules they wrap
 (`MLKEM.Category3`, `MLDSA.Category3`, `FNDSA.Falcon512`, ...) remain available, with the full
 interface: ML-DSA internal and external-μ signing, Falcon expanded keys, certificates and
-message recovery.
+message recovery. The SLH-DSA modules also expose the internal interface (`sign_internal`,
+`verify_internal`).
+
+SLH-DSA timings (Apple M-series, one core): `s` sets sign in 0.4–0.8 s and `f` sets in
+0.02–0.09 s; verification takes 1–5 ms; signatures are 7,856–49,856 bytes.
 
 ## Security
 

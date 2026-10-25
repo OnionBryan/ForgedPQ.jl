@@ -8,6 +8,8 @@
 | Signatures, general purpose | `MLDSA65` | pk 1952, sig 3309 |
 | Signatures, smallest | `Falcon512` | pk 897, sig 666 |
 | Signatures, highest security level | `MLDSA87` or `Falcon1024` | pk 2592 / 1793, sig 4627 / 1280 |
+| Signatures that survive a break of lattice problems | `SLHDSA_SHA2_128s` (or any SLH-DSA set) | pk 32, sig 7856 |
+| Hash-based signatures, fast signing | `SLHDSA_SHA2_128f` | pk 32, sig 17088 |
 
 ## ML-KEM or X-Wing
 
@@ -22,6 +24,18 @@ about a fifth the size, at the cost of a more delicate signer (Gaussian sampling
 point, emulated in integers here). FN-DSA, NIST's standard based on Falcon, is not yet
 published; this package implements the Falcon round-3 specification, with options for the
 changes NIST has announced ([Security](security.md)).
+
+## SLH-DSA
+
+ML-DSA, ML-KEM and Falcon all rest on lattice problems; SLH-DSA rests only on the security of its
+hash function, the most conservative assumption available. The price is size and signing time:
+signatures of 8–50 KB, and signing that takes 0.4–0.8 s in the small (`s`) sets or 20–90 ms in
+the fast (`f`) sets. It suits signatures made rarely and kept long — firmware, root certificates,
+archives — and pairs with ML-DSA where a second, independent assumption is wanted.
+
+The SHA2 and SHAKE sets are equally secure; choose the hash your platform already relies on.
+`s` sets give the smaller signature and `f` sets the faster signer. Keys are tiny either way
+(public key 32–64 bytes).
 
 ## Pure or pre-hash signing
 

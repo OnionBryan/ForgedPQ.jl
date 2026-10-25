@@ -93,6 +93,37 @@ end
     @test isempty(bad) || (foreach(println, unique(bad)); false)
 end
 
+# SLH-DSA: a well-formed but random secret key in a small (s) set signs for about a second, so
+# those sets fuzz signing only with secret keys of the wrong length.
+@testset "Malformed input: $(M.NAME)" for M in (SLHDSA_SHA2_128s, SLHDSA_SHA2_128f, SLHDSA_SHA2_192s, SLHDSA_SHA2_192f,
+                                              SLHDSA_SHA2_256s, SLHDSA_SHA2_256f, SLHDSA_SHAKE_128s, SLHDSA_SHAKE_128f,
+                                              SLHDSA_SHAKE_192s, SLHDSA_SHAKE_192f, SLHDSA_SHAKE_256s, SLHDSA_SHAKE_256f)
+    pk, sk = M.keygen(); msg = garbage(40); bad = String[]
+    fast = endswith(M.NAME, "f")
+    for _ in 1:max(1, FUZZ_N ÷ 8)
+        for n in lengths(M.SIGNATURE_BYTES)
+            fuzz!(bad, "verify(sig[$n])", () -> M.verify(pk, msg, garbage(n)) && error("forged signature accepted"))
+            fuzz!(bad, "verify_internal(sig[$n])", () -> M.verify_internal(pk, msg, garbage(n)) && error("accepted"))
+        end
+        for n in lengths(M.PUBLIC_KEY_BYTES)
+            fuzz!(bad, "verify(pk[$n])", () -> M.verify(garbage(n), msg, garbage(M.SIGNATURE_BYTES)) && error("accepted"))
+        end
+        for n in lengths(M.SECRET_KEY_BYTES)
+            (fast || n != M.SECRET_KEY_BYTES) && fuzz!(bad, "sign(sk[$n])", () -> M.sign(garbage(n), msg))
+        end
+        for n in lengths(M.SEED_BYTES)
+            n == M.SEED_BYTES && !fast && continue
+            fuzz!(bad, "keygen(seed[$n])", () -> M.keygen(garbage(n)))
+        end
+        fuzz!(bad, "verify_prehash(hash)", () -> M.verify_prehash(pk, msg, garbage(M.SIGNATURE_BYTES), randstring(rand(0:12))))
+        fuzz!(bad, "sign_prehash(hash)", () -> M.sign_prehash(garbage(M.SECRET_KEY_BYTES - 1), msg, randstring(rand(0:12))))
+        for n in (256, rand(257:600))
+            fuzz!(bad, "sign(context[$n])", () -> M.sign(sk, msg; context = garbage(n)))
+        end
+    end
+    @test isempty(bad) || (foreach(println, unique(bad)); false)
+end
+
 @testset "Malformed input: X-Wing and X25519" begin
     pk, sk = XWing.keygen(); ct, _ = XWing.encaps(pk); bad = String[]
     for _ in 1:FUZZ_N

@@ -10,6 +10,13 @@ let V = Vector{UInt8}
         precompile(M.sign, (V, V)); precompile(M.sign, (V, V, V)); precompile(M.verify, (V, V, V))
         precompile(M.sign_prehash, (V, V, String)); precompile(M.verify_prehash, (V, V, V, String))
     end
+    # The SLH-DSA functions are generic over the parameter set: these compile the code all twelve share.
+    for M in (SLHDSA_SHA2_128f, SLHDSA_SHAKE_128f, SLHDSA_SHA2_256f)
+        precompile(M.keygen, ()); precompile(M.keygen, (V,))
+        precompile(M.sign, (V, V)); precompile(M.sign, (V, V, V)); precompile(M.verify, (V, V, V))
+        precompile(M.sign_prehash, (V, V, String)); precompile(M.verify_prehash, (V, V, V, String))
+        precompile(M.sign_internal, (V, V)); precompile(M.verify_internal, (V, V, V))
+    end
     for M in (Falcon512, Falcon1024)
         precompile(M.keygen, ()); precompile(M.sign, (V, V)); precompile(M.verify, (V, V, V))
     end

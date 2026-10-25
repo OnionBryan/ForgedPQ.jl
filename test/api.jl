@@ -55,7 +55,7 @@ end
 # The SHA-512/t computed from SHA-512 with the FIPS 180-4 initial values, which HashML-DSA uses
 # where SHA.jl lacks sha2_512_224/256 (Julia 1.10, 1.11), against the FIPS 180-4 "abc" values.
 @testset "SHA-512/224 and SHA-512/256 pre-hash" begin
-    M = ForgedPQ.MLDSA; abc = Vector{UInt8}("abc")
+    M = ForgedPQ.Prehash; abc = Vector{UInt8}("abc")
     @test bytes2hex(M.sha512t(abc, M.SHA512_224_IV, 28)) == "4634270f707b6a54daae7530460842e20e37ed265ceee9a43e8924aa"
     @test bytes2hex(M.sha512t(abc, M.SHA512_256_IV, 32)) == "53048e2681941ef99b2e29b76b4c7dabe4c2d0c634fc6d46e0e2f13107e7af23"
     for len in (0, 111, 112, 127, 128, 129, 1000)

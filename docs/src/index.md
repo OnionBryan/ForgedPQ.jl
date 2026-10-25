@@ -1,12 +1,13 @@
 # ForgedPQ.jl
 
-Post-quantum cryptography in pure Julia: the NIST lattice standards ML-KEM (FIPS 203) and ML-DSA
-(FIPS 204), Falcon (the basis of FN-DSA, to be standardized as FIPS 206), the X-Wing hybrid KEM,
-X25519 and Shamir secret sharing. The only runtime dependencies are Julia's standard libraries.
+Post-quantum cryptography in pure Julia: the three NIST post-quantum standards — ML-KEM
+(FIPS 203), ML-DSA (FIPS 204) and SLH-DSA (FIPS 205) — Falcon (the basis of FN-DSA, to be
+standardized as FIPS 206), the X-Wing hybrid KEM, X25519 and Shamir secret sharing. The only
+runtime dependencies are Julia's standard libraries.
 
-ML-KEM and ML-DSA pass the 855 NIST ACVP vectors for every interface and the Wycheproof vectors;
-Falcon signing is byte-exact with the round-3 C reference. CI checks interoperability with
-liboqs on every push.
+ML-KEM, ML-DSA and SLH-DSA pass all 2,103 NIST ACVP vectors for every interface, and ML-KEM and
+ML-DSA the Wycheproof vectors; Falcon signing is byte-exact with the round-3 C reference. CI
+checks interoperability with liboqs on every push.
 
 ## Installation
 

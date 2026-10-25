@@ -4,6 +4,11 @@
 
 ### Added
 
+- SLH-DSA (FIPS 205), all twelve parameter sets (`SLHDSA_SHA2_128s` … `SLHDSA_SHAKE_256f`): key
+  generation, pure and pre-hash signing (hedged or deterministic) and verification, and the
+  internal interface. Passes all 1,248 NIST ACVP vectors. The SHA2 sets run on a new SHA-256/512
+  engine (`Sha2`) that finishes each hash from the midstate of PK.seed ‖ padding.
+- `Prehash`: the pre-hash table shared by HashML-DSA and HashSLH-DSA (moved from the ML-DSA modules).
 - One module per parameter set under its standard name — `MLKEM512`, `MLKEM768`, `MLKEM1024`,
   `MLDSA44`, `MLDSA65`, `MLDSA87`, `Falcon512`, `Falcon1024` — with `keygen`, `encaps`/`decaps`,
   `sign`/`verify`, `sign_prehash`/`verify_prehash`, key checks and size constants, arguments in
