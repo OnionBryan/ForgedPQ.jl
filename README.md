@@ -1,7 +1,7 @@
 # ForgedPQ.jl
 
 [![CI](https://github.com/OnionBryan/ForgedPQ.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/OnionBryan/ForgedPQ.jl/actions/workflows/ci.yml)
-[![Docs](https://img.shields.io/badge/docs-stable-blue.svg)](https://onionbryan.github.io/ForgedPQ.jl/stable/)
+[![Docs](https://img.shields.io/badge/docs-dev-blue.svg)](https://onionbryan.github.io/ForgedPQ.jl/dev/)
 [![Aqua QA](https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg)](https://github.com/JuliaTesting/Aqua.jl)
 
 Post-quantum cryptography in pure Julia: the NIST lattice standards ML-KEM (FIPS 203) and
